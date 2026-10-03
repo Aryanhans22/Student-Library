@@ -5,31 +5,38 @@ import type { RegisterFormData, Profile } from '../types/database';
 export async function signIn(emailOrId: string, password: string) {
   const term = emailOrId.trim();
 
-  // 1. If Supabase is configured, try Supabase Auth first
+  // 1. If Supabase is configured, use Supabase Auth exclusively
   if (isSupabaseConfigured) {
-    try {
-      let emailToTry = term;
-      if (!term.includes('@')) {
-        const found = await mockStore.findAccountByIdentifier(term);
-        if (found?.email) {
-          emailToTry = found.email;
-        }
+    let emailToTry = term;
+    if (!term.includes('@')) {
+      // Look up student by student_id in Supabase profiles
+      const { data: foundProfile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('student_id', term)
+        .maybeSingle();
+      
+      if (foundProfile?.email) {
+        emailToTry = foundProfile.email;
       }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailToTry,
-        password,
-      });
-
-      if (!error && data?.user) {
-        return data;
-      }
-    } catch (err: any) {
-      console.warn('Supabase auth attempt:', err?.message);
     }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: emailToTry,
+      password,
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Invalid email or password.');
+    }
+
+    if (data?.user) {
+      return data;
+    }
+    throw new Error('Login failed. Please check your credentials.');
   }
 
-  // 2. Fallback: Always check mockStore (for accounts created by admin, reset passwords, or local users)
+  // 2. Fallback: Only when Supabase is NOT configured (offline / demo mode)
   try {
     const mockProfile = await mockStore.signIn(term, password);
     return {
@@ -114,12 +121,33 @@ export async function getProfile(authUserId: string): Promise<Profile | null> {
   }
 
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('auth_user_id', authUserId)
       .single();
-    if (error) {
+
+    if (!data) {
+      // Self-healing attempt: call sync_my_profile RPC to link existing profile by auth email
+      try {
+        const syncRes = await supabase.rpc('sync_my_profile');
+        if (syncRes.data?.success) {
+          const refetch = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('auth_user_id', authUserId)
+            .single();
+          if (refetch.data) {
+            data = refetch.data;
+            error = null;
+          }
+        }
+      } catch (syncErr) {
+        // RPC might not exist yet if migration hasn't been run
+      }
+    }
+
+    if (error && !data) {
       if (error.code === 'PGRST116') return null;
       throw error;
     }

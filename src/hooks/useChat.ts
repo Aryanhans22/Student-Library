@@ -40,26 +40,63 @@ export function useChat() {
                .eq('conversation_id', conv.id)
                .order('created_at', { ascending: false })
                .limit(1)
-               .single();
+               .maybeSingle();
              
              return {
                 ...conv,
                 latest_message: msgData || undefined
              } as ChatConversation;
           }));
+
+          // For admin: also include any registered students from Supabase who don't have a conversation yet
+          if (role === 'admin') {
+            const { data: allStudents } = await supabase
+              .from('profiles')
+              .select('id, full_name, email, role, profile_image_url, student_id')
+              .eq('role', 'student');
+
+            if (allStudents && allStudents.length > 0) {
+              const existingStudentIds = new Set(convosWithMessages.map(c => c.student_id));
+              const missingStudents = allStudents.filter(s => !existingStudentIds.has(s.id));
+              
+              const placeholderConvos = missingStudents.map(s => ({
+                id: `new_${s.id}`,
+                student_id: s.id,
+                admin_id: null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                last_message_at: new Date(0).toISOString(),
+                status: 'active',
+                unread_by_student: 0,
+                unread_by_admin: 0,
+                student: s,
+                latest_message: undefined
+              } as unknown as ChatConversation));
+
+              setConversations([...convosWithMessages, ...placeholderConvos]);
+              setLoading(false);
+              return;
+            }
+          }
+
           setConversations(convosWithMessages);
+          setLoading(false);
+          return;
+        } else if (fetchErr) {
+          console.error('[HELPDESK] fetchConversations error:', fetchErr);
+          setError(fetchErr.message);
           setLoading(false);
           return;
         }
       }
       
-      // Fallback to mockStore
-      if (role === 'admin') {
+      // Fallback to mockStore ONLY when Supabase is completely NOT configured
+      if (!isSupabaseConfigured && role === 'admin') {
         const mockConvos = await mockStore.getConversations(currentUserId);
         setConversations(mockConvos as any);
       }
-    } catch (e) {
-      console.warn('Fallback to mock', e);
+    } catch (e: any) {
+      console.warn('[HELPDESK] Fetch conversations error:', e);
     }
     setLoading(false);
   }, []);
@@ -98,16 +135,20 @@ export function useChat() {
 
           if (!error && data) {
             setMessages(data);
-            setLoading(false);
-            return;
           }
+        } else {
+          // No conversation yet, just set empty messages
+          setActiveConversationId(`new_${otherUserId}`);
+          setMessages([]);
         }
+        setLoading(false);
+        return; // Return here so we don't hit mock store fallback
       } catch (err: any) {
         console.warn('Supabase fetchMessages error:', err.message);
       }
     }
 
-    // MockStore fallback
+    // MockStore fallback (only if Supabase is not configured or failed unexpectedly)
     setActiveConversationId(`mock_${otherUserId}`);
     const fallbackData = await mockStore.getMessages(otherUserId, currentUserId);
     setMessages(fallbackData as any);
@@ -121,31 +162,31 @@ export function useChat() {
 
     if (isSupabaseConfigured) {
       try {
-        // Use RPC to securely send and create conversation if missing
-        // For admin sending to student, receiverId is the student. For student sending to admin, senderId is the student.
-        // We need the student_id for the RPC.
-        // We can look it up from the current conversation list, or just guess based on roles.
-        // Since we don't know roles directly here, let's look at conversations state.
-        
-        // Find if we are student or admin
-        const myProfile = activeChatProfileRef.current?.currentUserId === senderId ? 
-           activeChatProfileRef.current.currentUserId : senderId;
-           
-        // But the RPC just takes p_student_id
-        let studentId = receiverId; // assume we are admin sending to student
-        const existingConv = conversations.find(c => c.student_id === senderId);
-        if (existingConv) studentId = senderId; // Ah, we are the student!
+        // Find if sender is student or admin
+        const { data: profile } = await supabase.from('profiles').select('role').eq('id', senderId).maybeSingle();
+        const studentId = profile?.role === 'student' ? senderId : receiverId;
+
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!isUuid.test(studentId)) {
+          throw new Error('This student profile was from a previous demo session and does not exist in the live database. Please select a registered student from the list.');
+        }
 
         const { data, error } = await supabase.rpc('send_chat_message', {
           p_student_id: studentId,
           p_message: trimmed
         });
 
-        if (!error && data?.success) {
-          // Optimistic UI handled by realtime, but we can append locally if we want.
-          // Wait, the prompt says "If an optimistic message is displayed... final UI must contain message only ONCE."
-          // To be perfectly safe, we let Realtime handle the insert!
-          // But we want immediate feedback, so we can optimistically insert.
+        if (error) {
+          console.error('[HELPDESK] send_chat_message RPC error:', error);
+          throw new Error(error.message || 'Failed to send message');
+        }
+
+        if (data && !data.success) {
+          console.error('[HELPDESK] send_chat_message business error:', data.error);
+          throw new Error(data.error || 'Failed to send message');
+        }
+
+        if (data?.success) {
           const tempMsg: ChatMessage = {
              id: data.message_id,
              conversation_id: data.conversation_id,
@@ -154,19 +195,28 @@ export function useChat() {
              created_at: new Date().toISOString(),
              read_at: null
           };
-          setMessages(prev => [...prev, tempMsg]);
+          
+          setMessages(prev => {
+             if (prev.some(m => m.id === tempMsg.id)) return prev;
+             return [...prev, tempMsg];
+          });
+          
+          if (activeConversationId !== data.conversation_id) {
+             setActiveConversationId(data.conversation_id);
+          }
+          
           return tempMsg;
         }
       } catch (err: any) {
-        console.warn('Supabase sendMessage fallback:', err.message);
+        console.error('[HELPDESK] Supabase sendMessage error:', err);
+        throw err;
       }
     }
 
     // Mock store
     const newMsg = await mockStore.sendMessage(senderId, receiverId, trimmed);
-    setMessages((prev) => [...prev, newMsg as any]);
     return newMsg;
-  }, [conversations]);
+  }, [activeConversationId]);
 
   // 4. Mark as read
   const markAsRead = useCallback(async (otherUserId: string, currentUserId: string) => {
@@ -176,53 +226,98 @@ export function useChat() {
         { ...c, unread_by_admin: 0, unread_by_student: 0 } : c))
     );
 
-    if (isSupabaseConfigured && activeConversationId) {
+    if (isSupabaseConfigured && activeConversationId && !activeConversationId.startsWith('mock_') && !activeConversationId.startsWith('new_')) {
       try {
-         // Mark all unread messages in this conversation where I am NOT the sender
          await supabase
           .from('messages')
           .update({ read_at: new Date().toISOString() })
           .eq('conversation_id', activeConversationId)
           .neq('sender_id', currentUserId)
           .is('read_at', null);
-          
-         // Reset conversation unread count
-         // Note: proper approach is an RPC or just let it be. We will just update locally for now.
       } catch (e) {
-         console.error(e);
+         console.error('[HELPDESK] markAsRead error:', e);
       }
     } else if (!isSupabaseConfigured) {
       await mockStore.markMessagesRead(otherUserId, currentUserId);
     }
   }, [activeConversationId]);
 
-  // 5. Realtime Subscription
+  // 5. Realtime Subscription for Active Conversation Messages
   useEffect(() => {
-    if (!isSupabaseConfigured || !activeConversationId || activeConversationId.startsWith('mock_')) {
-      // No realtime needed for mock data or when Supabase is not configured
+    if (!isSupabaseConfigured || !activeConversationId || activeConversationId.startsWith('mock_') || activeConversationId.startsWith('new_')) {
       return;
     }
 
+    console.log(`[HELPDESK REALTIME] Subscribing to messages for conversation: ${activeConversationId}`);
     const channel = supabase
       .channel(`chat_conv_${activeConversationId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversationId}` },
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'messages', 
+          filter: `conversation_id=eq.${activeConversationId}` 
+        },
         (payload) => {
+          console.log('[HELPDESK REALTIME] New message INSERT received:', payload.new);
           const newMsg = payload.new as ChatMessage;
           setMessages((prev) => {
-            // Avoid duplicate if optimistic UI already added the message
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
           });
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'messages', 
+          filter: `conversation_id=eq.${activeConversationId}` 
+        },
+        (payload) => {
+          console.log('[HELPDESK REALTIME] Message UPDATE received:', payload.new);
+          const updatedMsg = payload.new as ChatMessage;
+          setMessages((prev) => 
+            prev.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m))
+          );
+        }
+      )
+      .subscribe((status, err) => {
+        console.log(`[HELPDESK REALTIME] Channel status: ${status}`);
+        if (status === 'CHANNEL_ERROR') {
+          console.error('[HELPDESK REALTIME] Channel error details:', err);
+        }
+      });
 
     return () => {
+      console.log(`[HELPDESK REALTIME] Removing channel for conversation: ${activeConversationId}`);
       supabase.removeChannel(channel);
     };
   }, [activeConversationId]);
+  // Mock realtime listener for when Supabase is not configured
+  useEffect(() => {
+    if (isSupabaseConfigured || !activeConversationId || !activeConversationId.startsWith('mock_')) {
+      return;
+    }
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent;
+      const newMsg = custom.detail as any;
+      if (!newMsg?.conversation_id) return;
+      // Ensure the message belongs to the current mock conversation
+      const otherId = activeConversationId.replace('mock_', '');
+      if (!newMsg.conversation_id.includes(otherId)) return;
+      setMessages(prev => {
+        if (prev.some(m => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg];
+      });
+    };
+    window.addEventListener('mockChatInsert', handler);
+    return () => {
+      window.removeEventListener('mockChatInsert', handler);
+    };
+  }, [activeConversationId, isSupabaseConfigured]);
 
   return {
     messages,

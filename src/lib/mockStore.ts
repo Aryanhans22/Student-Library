@@ -857,6 +857,10 @@ class MockDataStore {
     };
 
     this.messages.push(newMsg as any); // using as any to bypass temporary type mismatch in mock store internals
+    // Emit a custom event to simulate realtime updates for mock mode
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      window.dispatchEvent(new CustomEvent('mockChatInsert', { detail: newMsg }));
+    }
 
     // Also trigger in-app notification to receiver
     this.notifications.unshift({

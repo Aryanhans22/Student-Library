@@ -55,23 +55,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const userProfile = await getProfile(session.user.id);
             setProfile(userProfile);
           } else {
-            // Check if mock user is stored
-            const mockUser = mockStore.getCurrentUser();
-            if (mockUser) {
-              setUser({ id: mockUser.auth_user_id, email: mockUser.email } as any);
-              setProfile(mockUser);
-            } else {
-              setUser(null);
-              setProfile(null);
-            }
+            setUser(null);
+            setProfile(null);
           }
         }
       } catch (error) {
         console.error('Error fetching initial session:', error);
-        const mockUser = mockStore.getCurrentUser();
-        if (mounted && mockUser) {
-          setUser({ id: mockUser.auth_user_id, email: mockUser.email } as any);
-          setProfile(mockUser);
+        if (mounted) {
+          setUser(null);
+          setProfile(null);
         }
       } finally {
         if (mounted) setLoading(false);

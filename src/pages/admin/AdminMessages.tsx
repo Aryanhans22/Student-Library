@@ -358,7 +358,7 @@ export default function AdminMessages() {
                   </div>
                 ) : (
                   messages.map((msg) => {
-                    const isMe = msg.sender_id === effectiveAdminId || msg.sender_id === DEFAULT_ADMIN_ID;
+                    const isMe = msg.sender_id !== selectedStudent.id;
 
                     return (
                       <div
