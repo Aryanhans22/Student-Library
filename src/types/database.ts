@@ -90,15 +90,32 @@ export interface SeatFormData {
   status: SeatStatus;
 }
 
+export interface ChatConversation {
+  id: string;
+  student_id: string;
+  admin_id: string | null;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string;
+  status: string;
+  unread_by_student: number;
+  unread_by_admin: number;
+  student?: Profile;
+  latest_message?: ChatMessage;
+}
+
 export interface ChatMessage {
   id: string;
+  conversation_id: string;
   sender_id: string;
-  receiver_id: string;
   message: string;
-  is_read: boolean;
   created_at: string;
+  read_at: string | null;
   sender?: Profile;
-  receiver?: Profile;
+  
+  // Legacy / Mock properties
+  receiver_id?: string;
+  is_read?: boolean;
 }
 
 export type SubscriptionStatus = 'active' | 'expiring_soon' | 'expired' | 'cancelled';

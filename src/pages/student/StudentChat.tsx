@@ -173,7 +173,7 @@ export default function StudentChat() {
                         })}
                       </span>
                       {isMe && (
-                        msg.is_read ? (
+                        msg.read_at ? (
                           <span title="Read by Admin">
                             <CheckCheck className="h-3 w-3 text-indigo-200" />
                           </span>

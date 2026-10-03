@@ -9,6 +9,7 @@ import {
 import { Avatar } from '../../components/ui/Avatar';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
 import toast from 'react-hot-toast';
 
 const QUICK_RESPONSES = [
@@ -32,14 +33,18 @@ export default function AdminMessages() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sending, setSending] = useState(false);
 
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [broadcastText, setBroadcastText] = useState('');
+  const [broadcasting, setBroadcasting] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const initializedRef = useRef(false);
 
   const effectiveAdminId = profile?.id || DEFAULT_ADMIN_ID;
 
-  // Load conversations immediately on mount
+  // Load conversations
   useEffect(() => {
-    fetchConversations(effectiveAdminId);
+    fetchConversations(effectiveAdminId, 'admin');
   }, [effectiveAdminId, fetchConversations]);
 
   // Initial student selection - run when conversations load
@@ -49,20 +54,24 @@ export default function AdminMessages() {
     if (!initializedRef.current) {
       initializedRef.current = true;
       const urlId = searchParams.get('student');
-      const foundInConvos = conversations.find((c) => c.student.id === urlId);
-      if (foundInConvos) {
+      const foundInConvos = conversations.find((c) => c.student?.id === urlId);
+      if (foundInConvos && foundInConvos.student) {
         setSelectedStudentId(foundInConvos.student.id);
       } else {
-        const firstId = conversations[0].student.id;
-        setSelectedStudentId(firstId);
-        setSearchParams({ student: firstId }, { replace: true });
+        const firstId = conversations[0]?.student?.id;
+        if (firstId) {
+          setSelectedStudentId(firstId);
+          setSearchParams({ student: firstId }, { replace: true });
+        }
       }
     } else {
       // If currently selected student was removed or doesn't exist, fallback safely
-      if (selectedStudentId && !conversations.some((c) => c.student.id === selectedStudentId)) {
-        const fallbackId = conversations[0].student.id;
-        setSelectedStudentId(fallbackId);
-        setSearchParams({ student: fallbackId }, { replace: true });
+      if (selectedStudentId && !conversations.some((c) => c.student?.id === selectedStudentId)) {
+        const fallbackId = conversations[0]?.student?.id;
+        if (fallbackId) {
+          setSelectedStudentId(fallbackId);
+          setSearchParams({ student: fallbackId }, { replace: true });
+        }
       }
     }
   }, [conversations, searchParams, setSearchParams, selectedStudentId]);
@@ -86,10 +95,11 @@ export default function AdminMessages() {
     setSearchParams({ student: studentId }, { replace: true });
   };
 
-  const selectedConversation = conversations.find((c) => c.student.id === selectedStudentId);
+  const selectedConversation = conversations.find((c) => c.student?.id === selectedStudentId);
   const selectedStudent = selectedConversation?.student;
 
   const filteredConversations = conversations.filter((c) => {
+    if (!c.student) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -110,12 +120,55 @@ export default function AdminMessages() {
 
     try {
       await sendMessage(effectiveAdminId, selectedStudentId, textToSend);
-      fetchConversations(effectiveAdminId);
+      fetchConversations(effectiveAdminId, 'admin');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send message');
       setInputText(textToSend);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleBroadcast = async () => {
+    if (!broadcastText.trim()) {
+      toast.error('Please enter a message to broadcast');
+      return;
+    }
+    
+    setBroadcasting(true);
+    let successCount = 0;
+    
+    try {
+      // Create an array of student IDs
+      const studentIds = conversations.map(c => c.student?.id).filter(Boolean) as string[];
+      
+      if (studentIds.length === 0) {
+        toast.error('No students found to message');
+        setBroadcasting(false);
+        return;
+      }
+      
+      // Send messages concurrently or sequentially
+      // We will do it sequentially to avoid overwhelming the mock store / backend
+      for (const id of studentIds) {
+        try {
+          await sendMessage(effectiveAdminId, id, broadcastText.trim());
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to send to ${id}`, e);
+        }
+      }
+      
+      toast.success(`Broadcast sent to ${successCount} students`);
+      setShowBroadcastModal(false);
+      setBroadcastText('');
+      fetchConversations(effectiveAdminId, 'admin');
+      if (selectedStudentId) fetchMessages(selectedStudentId, effectiveAdminId);
+      
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send broadcast');
+    } finally {
+      setBroadcasting(false);
     }
   };
 
@@ -136,18 +189,28 @@ export default function AdminMessages() {
             Direct real-time communication between library administration and enrolled students.
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<RefreshCw className="h-4 w-4" />}
-          onClick={() => {
-            fetchConversations(effectiveAdminId);
-            if (selectedStudentId) fetchMessages(selectedStudentId, effectiveAdminId);
-            toast.success('Messages refreshed');
-          }}
-        >
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<MessageSquare className="h-4 w-4" />}
+            onClick={() => setShowBroadcastModal(true)}
+          >
+            Broadcast
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RefreshCw className="h-4 w-4" />}
+            onClick={() => {
+              fetchConversations(effectiveAdminId, 'admin');
+              if (selectedStudentId) fetchMessages(selectedStudentId, effectiveAdminId);
+              toast.success('Messages refreshed');
+            }}
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Main Split-Pane Container */}
@@ -182,12 +245,11 @@ export default function AdminMessages() {
                 <p className="text-sm">No conversations found</p>
               </div>
             ) : (
-              filteredConversations.map(({ student, lastMessage, unreadCount }) => {
+              filteredConversations.map((conv) => {
+                const { student, latest_message, unread_by_admin } = conv;
+                if (!student) return null;
                 const isSelected = student.id === selectedStudentId;
-                const isFromMe =
-                  lastMessage?.sender_id === profile?.id ||
-                  lastMessage?.sender_id === DEFAULT_ADMIN_ID ||
-                  lastMessage?.sender?.role === 'admin';
+                const isFromMe = latest_message?.sender_id === effectiveAdminId || latest_message?.sender_id === DEFAULT_ADMIN_ID;
 
                 return (
                   <button
@@ -202,9 +264,9 @@ export default function AdminMessages() {
                   >
                     <div className="relative flex-shrink-0">
                       <Avatar name={student.full_name} src={student.profile_image_url || undefined} size="md" />
-                      {unreadCount > 0 && (
+                      {unread_by_admin > 0 && (
                         <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-[10px] font-bold text-white ring-2 ring-white">
-                          {unreadCount}
+                          {unread_by_admin}
                         </span>
                       )}
                     </div>
@@ -214,9 +276,9 @@ export default function AdminMessages() {
                         <span className={`text-sm font-semibold truncate ${isSelected ? 'text-indigo-900' : 'text-gray-900'}`}>
                           {student.full_name}
                         </span>
-                        {lastMessage && (
+                        {latest_message && (
                           <span className="text-[11px] text-gray-400 ml-1 flex-shrink-0">
-                            {new Date(lastMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(latest_message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
                       </div>
@@ -227,11 +289,11 @@ export default function AdminMessages() {
                         </span>
                       </div>
 
-                      <p className={`text-xs truncate ${unreadCount > 0 ? 'font-semibold text-gray-800' : 'text-gray-500'}`}>
-                        {lastMessage ? (
+                      <p className={`text-xs truncate ${unread_by_admin > 0 ? 'font-semibold text-gray-800' : 'text-gray-500'}`}>
+                        {latest_message ? (
                           <>
                             {isFromMe ? <span className="text-gray-400 font-medium">You: </span> : null}
-                            {lastMessage.message}
+                            {latest_message.message}
                           </>
                         ) : (
                           <span className="italic text-gray-400">No messages yet</span>
@@ -296,10 +358,7 @@ export default function AdminMessages() {
                   </div>
                 ) : (
                   messages.map((msg) => {
-                    const isMe =
-                      msg.sender_id === profile?.id ||
-                      msg.sender_id === DEFAULT_ADMIN_ID ||
-                      msg.sender?.role === 'admin';
+                    const isMe = msg.sender_id === effectiveAdminId || msg.sender_id === DEFAULT_ADMIN_ID;
 
                     return (
                       <div
@@ -333,7 +392,7 @@ export default function AdminMessages() {
                               })}
                             </span>
                             {isMe && (
-                              msg.is_read ? (
+                              msg.read_at ? (
                                 <span title="Read by student">
                                   <CheckCheck className="h-3 w-3 text-indigo-200" />
                                 </span>
@@ -401,6 +460,50 @@ export default function AdminMessages() {
           )}
         </div>
       </div>
+
+      <Modal
+        isOpen={showBroadcastModal}
+        onClose={() => !broadcasting && setShowBroadcastModal(false)}
+        title="Broadcast Message"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Send a direct message to <strong>all {conversations.length} enrolled students</strong>. This is useful for library-wide announcements, holiday notices, or urgent alerts.
+          </p>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Message
+            </label>
+            <textarea
+              value={broadcastText}
+              onChange={(e) => setBroadcastText(e.target.value)}
+              placeholder="Type your announcement here..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 min-h-[120px] resize-none"
+              disabled={broadcasting}
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={() => setShowBroadcastModal(false)}
+              disabled={broadcasting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleBroadcast}
+              disabled={!broadcastText.trim() || broadcasting}
+              loading={broadcasting}
+              icon={<Send className="h-4 w-4" />}
+            >
+              Send to {conversations.length} Students
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

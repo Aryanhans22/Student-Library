@@ -52,10 +52,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchStats();
     fetchStudents({ page: 1, limit: 5 });
-    fetchConversations(effectiveAdminId);
+    fetchConversations(effectiveAdminId, 'admin');
   }, [fetchStats, fetchStudents, fetchConversations, effectiveAdminId]);
 
-  const totalUnread = conversations.reduce((acc, c) => acc + c.unreadCount, 0);
+  const totalUnread = conversations.reduce((acc, c) => acc + (c.unread_by_admin || 0), 0);
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -287,7 +287,10 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {conversations.slice(0, 5).map(({ student, lastMessage, unreadCount }) => (
+              {conversations.slice(0, 5).map((conv) => {
+                const { student, latest_message, unread_by_admin } = conv;
+                if (!student) return null;
+                return (
                 <div
                   key={student.id}
                   className="p-4 sm:px-6 flex items-center justify-between hover:bg-slate-50/80 transition-colors"
@@ -300,21 +303,21 @@ export default function AdminDashboard() {
                         <span className="text-[11px] font-mono font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                           {student.student_id || 'Student'}
                         </span>
-                        {unreadCount > 0 && (
+                        {unread_by_admin > 0 && (
                           <span className="px-2 py-0.5 text-[10px] font-bold bg-indigo-600 text-white rounded-full">
-                            {unreadCount} new
+                            {unread_by_admin} new
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-slate-500 truncate max-w-md mt-0.5">
-                        {lastMessage?.message || 'No messages exchanged yet'}
+                        {latest_message?.message || 'No messages exchanged yet'}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    {lastMessage && (
+                    {latest_message && (
                       <span className="text-[11px] text-slate-400 hidden sm:inline-block">
-                        {new Date(lastMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(latest_message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     )}
                     <Button
@@ -327,7 +330,8 @@ export default function AdminDashboard() {
                     </Button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

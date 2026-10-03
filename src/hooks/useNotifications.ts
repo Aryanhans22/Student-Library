@@ -79,6 +79,39 @@ export function useNotifications(userId?: string) {
   useEffect(() => {
     if (userId) {
       fetchNotifications(userId);
+      
+      if (isSupabaseConfigured) {
+        const channel = supabase
+          .channel(`notifs_${userId}`)
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+            (payload) => {
+              const newNotif = payload.new as AppNotification;
+              setNotifications((prev) => {
+                if (prev.some((n) => n.id === newNotif.id)) return prev;
+                return [newNotif, ...prev];
+              });
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabase.removeChannel(channel);
+        };
+      } else {
+        // MockStore realtime: listen to cross-tab localStorage changes
+        const handleStorageChange = (e: StorageEvent) => {
+          if (e.key === 'library_notifications') {
+            mockStore.getNotifications(userId).then(notifs => setNotifications(notifs));
+          }
+        };
+        
+        window.addEventListener('storage', handleStorageChange);
+        return () => {
+          window.removeEventListener('storage', handleStorageChange);
+        };
+      }
     }
   }, [userId, fetchNotifications]);
 

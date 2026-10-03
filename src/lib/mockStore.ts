@@ -108,12 +108,13 @@ class MockDataStore {
   private demoBookings: DemoBooking[] = [];
 
   constructor() {
-    this.init();
+    this.syncFromStorage();
   }
 
-  private init() {
+  private syncFromStorage() {
     try {
       const storedProfiles = localStorage.getItem(STORAGE_KEYS.PROFILES);
+
       if (storedProfiles) {
         try {
           const parsed = JSON.parse(storedProfiles);
@@ -176,17 +177,26 @@ class MockDataStore {
         (p) => p.role === 'admin' || (!p.email.toLowerCase().endsWith('@example.com') && !p.id.startsWith('s0000000-0000'))
       );
       this.assignments = this.assignments.filter(
-        (a) => !a.student_id.startsWith('s0000000-0000') && this.profiles.some((p) => p.id === a.student_id)
+        (a) => !a.student_id?.startsWith('s0000000-0000') && this.profiles.some((p) => p.id === a.student_id)
       );
       this.subscriptions = this.subscriptions.filter(
-        (s) => !s.student_id.startsWith('s0000000-0000') && this.profiles.some((p) => p.id === s.student_id)
+        (s) => !s.student_id?.startsWith('s0000000-0000') && this.profiles.some((p) => p.id === s.student_id)
       );
-      this.messages = this.messages.filter(
-        (m) =>
-          !m.sender_id.startsWith('s0000000-0000') &&
-          !m.receiver_id.startsWith('s0000000-0000')
-      );
-      this.notifications = this.notifications.filter((n) => !n.user_id.startsWith('s0000000-0000'));
+      
+      // Fix: Safely filter messages to prevent crashes from old schema data (missing sender_id)
+      this.messages = this.messages.filter((m) => {
+        const sId = m.sender_id || (m as any).student_id || '';
+        const rId = m.receiver_id || '';
+        return !sId.startsWith('s0000000-0000') && !rId.startsWith('s0000000-0000');
+      });
+
+      // Fix: Clear legacy demo notifications and safely filter
+      this.notifications = this.notifications.filter((n) => {
+        const userId = n.user_id || '';
+        const isDemoAdminNotif = n.id?.startsWith('notif_admin_demo_') || n.id?.startsWith('notif_00');
+        const isDemoStudentNotif = userId.startsWith('s0000000-0000');
+        return !isDemoAdminNotif && !isDemoStudentNotif;
+      });
 
       // Ensure all unassigned seats are marked available
       this.seats.forEach((seat) => {
@@ -448,6 +458,7 @@ class MockDataStore {
   }
 
   getAllStudents(): Profile[] {
+    this.syncFromStorage();
     return this.profiles.filter((p) => p.role === 'student');
   }
 
@@ -788,6 +799,7 @@ class MockDataStore {
 
   // --- Chat Messaging APIs ---
   async getMessages(otherUserId: string, currentUserId: string): Promise<ChatMessage[]> {
+    this.syncFromStorage(); // Sync cross-tab updates
     await new Promise((r) => setTimeout(r, 80));
     const defaultAdminId = 'a0000000-0000-0000-0000-000000000001';
     const currentUser = this.profiles.find((p) => p.id === currentUserId);
@@ -829,22 +841,22 @@ class MockDataStore {
   }
 
   async sendMessage(senderId: string, receiverId: string, message: string): Promise<ChatMessage> {
+    this.syncFromStorage();
     await new Promise((r) => setTimeout(r, 100));
     const sender = this.profiles.find((p) => p.id === senderId);
     const receiver = this.profiles.find((p) => p.id === receiverId);
 
     const newMsg: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      conversation_id: `conv_${senderId}_${receiverId}`, // mock logic
       sender_id: senderId,
-      receiver_id: receiverId,
       message: message.trim(),
-      is_read: false,
+      read_at: null,
       created_at: new Date().toISOString(),
       sender: sender || ({ id: senderId, full_name: 'Library Admin', email: 'admin@library.com', role: 'admin' } as any),
-      receiver: receiver || ({ id: receiverId, full_name: 'Student', email: '', role: 'student' } as any),
     };
 
-    this.messages.push(newMsg);
+    this.messages.push(newMsg as any); // using as any to bypass temporary type mismatch in mock store internals
 
     // Also trigger in-app notification to receiver
     this.notifications.unshift({
@@ -863,14 +875,15 @@ class MockDataStore {
   }
 
   async markMessagesRead(senderId: string, receiverId: string): Promise<void> {
+    this.syncFromStorage();
     let changed = false;
     const defaultAdminId = 'a0000000-0000-0000-0000-000000000001';
     this.messages.forEach((m) => {
       const matchReceiver = m.receiver_id === receiverId || (receiverId !== defaultAdminId && m.receiver_id === defaultAdminId);
       const matchSender = m.sender_id === senderId || (senderId !== defaultAdminId && m.sender_id === defaultAdminId);
       if ((m.sender_id === senderId && matchReceiver) || (matchSender && m.receiver_id === receiverId)) {
-        if (!m.is_read) {
-          m.is_read = true;
+        if (!m.read_at) {
+          m.read_at = new Date().toISOString();
           changed = true;
         }
       }
@@ -892,7 +905,7 @@ class MockDataStore {
 
       msgs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       const lastMessage = msgs[0] || null;
-      const unreadCount = msgs.filter((m) => m.sender_id === student.id && !m.is_read).length;
+      const unreadCount = msgs.filter((m) => m.sender_id === student.id && !m.read_at).length;
 
       return {
         student,
@@ -1006,6 +1019,7 @@ class MockDataStore {
 
   // --- Notifications APIs ---
   async getNotifications(userId: string): Promise<AppNotification[]> {
+    this.syncFromStorage();
     await new Promise((r) => setTimeout(r, 50));
     this.checkAndGenerateExpiryNotifications(userId);
     return this.notifications
@@ -1014,6 +1028,7 @@ class MockDataStore {
   }
 
   async markNotificationRead(notificationId: string): Promise<void> {
+    this.syncFromStorage();
     const notif = this.notifications.find((n) => n.id === notificationId);
     if (notif) {
       notif.is_read = true;
@@ -1022,6 +1037,7 @@ class MockDataStore {
   }
 
   async clearAllNotifications(userId: string): Promise<void> {
+    this.syncFromStorage();
     this.notifications = this.notifications.filter((n) => n.user_id !== userId);
     this.persist();
   }
