@@ -326,6 +326,138 @@ const Landing: React.FC = () => {
             </div>
           </div>
 
+          {/* SECTION: Flexible Study Shift Pricing */}
+          <div className="mt-20 scroll-mt-20" id="pricing">
+            <div className="text-center max-w-2xl mx-auto mb-12">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-3">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Transparent & Student-Friendly Pricing</span>
+              </div>
+              <h3 className="text-3xl font-extrabold text-white tracking-tight">Flexible Study Shifts & Plans</h3>
+              <p className="text-slate-400 text-sm mt-2">
+                Choose the timing that matches your study routine with all premium amenities included.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+              {/* Plan 1: Full Day 12 Hours */}
+              <div className="relative rounded-3xl bg-slate-900/90 border-2 border-indigo-500/60 p-8 shadow-2xl flex flex-col justify-between hover:border-indigo-400 transition-all group">
+                <div className="absolute -top-3.5 right-6 px-3 py-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full text-[11px] font-bold text-white uppercase tracking-wider shadow-md">
+                  Most Popular
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h4 className="text-xl font-bold text-white">Full Day Pass</h4>
+                      <p className="text-xs text-indigo-300 font-medium mt-0.5">12 Hours Dedicated Daily Access</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-3xl font-black text-white">₹1,200</span>
+                      <span className="text-xs text-slate-400"> / month</span>
+                    </div>
+                  </div>
+
+                  <div className="h-px bg-slate-800 my-5" />
+
+                  <ul className="space-y-3 text-sm text-slate-300">
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span><strong>12 Hours Access</strong> (7:00 AM – 7:00 PM or 8:00 AM – 8:00 PM)</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Dedicated reserved personal study desk</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>High-speed unlimited 5G optical Wi-Fi</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Personal 3-pin power socket & reading light</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Fully air-conditioned silent sanctuary hall</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Chilled RO drinking water & clean washrooms</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="pt-8">
+                  <Link
+                    to="/student/register"
+                    className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-xl font-semibold text-sm bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-500/30 transition group-hover:scale-[1.01]"
+                  >
+                    <span>Reserve 12-Hour Desk</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Plan 2: Half Day 6 Hours */}
+              <div className="relative rounded-3xl bg-slate-900/60 border border-slate-800 p-8 shadow-xl flex flex-col justify-between hover:border-slate-700 transition-all">
+                <div className="absolute -top-3.5 right-6 px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                  Flexible Shift
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h4 className="text-xl font-bold text-white">Half Day Pass</h4>
+                      <p className="text-xs text-slate-400 font-medium mt-0.5">6 Hours Daily (Morning / Evening)</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-3xl font-black text-white">₹600</span>
+                      <span className="text-xs text-slate-400"> / month</span>
+                    </div>
+                  </div>
+
+                  <div className="h-px bg-slate-800 my-5" />
+
+                  <ul className="space-y-3 text-sm text-slate-300">
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span><strong>6 Hours Shift</strong> (Morning: 7 AM – 1 PM or Evening: 1 PM – 7 PM)</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Comfortable ergonomic desk seating</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>High-speed unlimited 5G optical Wi-Fi</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Active charging switchboard at every desk</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Fully air-conditioned quiet reading environment</span>
+                    </li>
+                    <li className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>RO water and hygienic sanitized facilities</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="pt-8">
+                  <Link
+                    to="/student/register"
+                    className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-xl font-semibold text-sm bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition hover:border-slate-600"
+                  >
+                    <span>Reserve 6-Hour Desk</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Bottom Student Action Callout */}
           <div className="mt-16 bg-gradient-to-r from-indigo-950/90 via-purple-950/80 to-slate-950 rounded-3xl p-8 sm:p-10 border border-indigo-500/30 flex flex-wrap items-center justify-between gap-6 shadow-2xl">
             <div>

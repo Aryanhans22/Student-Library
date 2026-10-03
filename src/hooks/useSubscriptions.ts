@@ -143,8 +143,8 @@ export function useSubscriptions() {
         .from('subscriptions')
         .insert({
           student_id: data.student_id,
-          plan_name: data.plan_name || 'Monthly Study Pass',
-          amount_paid: Number(data.amount_paid) || 999,
+          plan_name: data.plan_name || 'Full Day (12 Hours) - Monthly',
+          amount_paid: Number(data.amount_paid) || 1200,
           start_date: data.start_date || new Date().toISOString().slice(0, 10),
           end_date: data.end_date || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
           status: 'active',
@@ -167,7 +167,7 @@ export function useSubscriptions() {
   }, []);
 
   const renewSubscription = useCallback(
-    async (subscriptionId: string, durationDays: number = 30, amountPaid: number = 999): Promise<StudentSubscription> => {
+    async (subscriptionId: string, durationDays: number = 30, amountPaid: number = 1200): Promise<StudentSubscription> => {
       setLoading(true);
       setError(null);
 

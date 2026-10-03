@@ -17,11 +17,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { StudentSubscription } from '../../types/database';
 import toast from 'react-hot-toast';
 
-const PRESET_PLANS: { name: string; durationDays: number; price: number }[] = [
-  { name: 'Monthly Study Pass', durationDays: 30, price: 999 },
-  { name: 'Quarterly Exam Pass', durationDays: 90, price: 2499 },
-  { name: 'Semester Pass', durationDays: 180, price: 4499 },
-  { name: 'Annual Scholar Pass', durationDays: 365, price: 7999 },
+const PRESET_PLANS: { name: string; durationDays: number; price: number; badge?: string }[] = [
+  { name: 'Full Day (12 Hours) - Monthly', durationDays: 30, price: 1200, badge: 'Popular' },
+  { name: 'Half Day (6 Hours) - Monthly', durationDays: 30, price: 600, badge: 'Flexible' },
+  { name: 'Full Day (12 Hours) - Quarterly', durationDays: 90, price: 3400 },
+  { name: 'Half Day (6 Hours) - Quarterly', durationDays: 90, price: 1700 },
+  { name: 'Full Day (12 Hours) - Annual', durationDays: 365, price: 12999, badge: 'Best Value' },
 ];
 
 export default function Subscriptions() {
@@ -35,15 +36,15 @@ export default function Subscriptions() {
   // Renew Modal state
   const [selectedSubForRenew, setSelectedSubForRenew] = useState<StudentSubscription | null>(null);
   const [renewPlanDays, setRenewPlanDays] = useState<number>(30);
-  const [renewPlanPrice, setRenewPlanPrice] = useState<number>(999);
+  const [renewPlanPrice, setRenewPlanPrice] = useState<number>(1200);
   const [isRenewing, setIsRenewing] = useState(false);
 
   // New Subscription Modal state
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [newSubStudentId, setNewSubStudentId] = useState('');
-  const [newSubPlan, setNewSubPlan] = useState<string>('Monthly Study Pass');
+  const [newSubPlan, setNewSubPlan] = useState<string>('Full Day (12 Hours) - Monthly');
   const [newSubDays, setNewSubDays] = useState<number>(30);
-  const [newSubPrice, setNewSubPrice] = useState<number>(999);
+  const [newSubPrice, setNewSubPrice] = useState<number>(1200);
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -381,7 +382,7 @@ export default function Subscriptions() {
                             onClick={() => {
                               setSelectedSubForRenew(sub);
                               setRenewPlanDays(30);
-                              setRenewPlanPrice(999);
+                              setRenewPlanPrice(1200);
                             }}
                           >
                             Renew Plan

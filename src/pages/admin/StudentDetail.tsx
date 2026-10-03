@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useStudents } from '../../hooks/useStudents';
 import { useSeatAssignments } from '../../hooks/useSeatAssignments';
 import { useSubscriptions } from '../../hooks/useSubscriptions';
-import { ArrowLeft, Edit, Armchair, AlertTriangle, Calendar, Phone, Mail, MapPin, MessageSquare, CreditCard, Clock, Sparkles } from 'lucide-react';
+import { ArrowLeft, Edit, Armchair, AlertTriangle, Calendar, Phone, Mail, MapPin, MessageSquare, CreditCard, Clock, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Card, CardHeader, CardContent } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
@@ -20,7 +20,7 @@ import toast from 'react-hot-toast';
 export default function StudentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getStudent, updateStudent, loading: studentLoading } = useStudents();
+  const { getStudent, updateStudent, deleteStudent, loading: studentLoading } = useStudents();
   const { getStudentAssignment, releaseSeat, loading: seatLoading } = useSeatAssignments();
   const { fetchStudentSubscription, subscription: studentSub, loading: subLoading } = useSubscriptions();
 
@@ -28,6 +28,8 @@ export default function StudentDetail() {
   const [assignment, setAssignment] = useState<any>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isReleaseConfirmOpen, setIsReleaseConfirmOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const [formData, setFormData] = useState<{
     full_name: string;
@@ -106,6 +108,21 @@ export default function StudentDetail() {
     }
   };
 
+  const handleDeleteStudent = async () => {
+    if (!student?.id) return;
+    try {
+      setIsDeleting(true);
+      await deleteStudent(student.id);
+      toast.success(`Student ${student.full_name} deleted successfully`);
+      setIsDeleteConfirmOpen(false);
+      navigate('/admin/students');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete student');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   if (studentLoading && !student) {
     return (
       <div className="space-y-6">
@@ -143,6 +160,13 @@ export default function StudentDetail() {
           </Button>
           <Button variant="outline" onClick={() => setIsEditModalOpen(true)}>
             <Edit className="w-4 h-4 mr-2" /> Edit Student
+          </Button>
+          <Button 
+            variant="outline" 
+            className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200" 
+            onClick={() => setIsDeleteConfirmOpen(true)}
+          >
+            <Trash2 className="w-4 h-4 mr-2 text-red-500" /> Delete
           </Button>
           {!assignment ? (
             <Button onClick={() => navigate(`/admin/seat-allocation?student=${student.id}`)}>
@@ -404,6 +428,17 @@ export default function StudentDetail() {
         title="Release Seat"
         message={`Are you sure you want to release seat ${assignment?.seat?.seat_number} from ${student.full_name}? The seat will become available for other students.`}
         confirmText="Release Seat"
+        cancelText="Cancel"
+        type="danger"
+      />
+
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={handleDeleteStudent}
+        title="Delete Student Record"
+        message={`Are you sure you want to permanently delete "${student.full_name}" (${student.student_id || 'No ID'})? Any allocated seat will be freed and all membership records will be permanently removed.`}
+        confirmText={isDeleting ? 'Deleting...' : 'Delete Student'}
         cancelText="Cancel"
         type="danger"
       />

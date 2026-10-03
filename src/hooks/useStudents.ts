@@ -261,6 +261,50 @@ export function useStudents() {
     }
   }, []);
 
+  const deleteStudent = useCallback(async (id: string) => {
+    setLoading(true);
+    setError(null);
+    if (!isSupabaseConfigured) {
+      try {
+        await mockStore.deleteStudent(id);
+        setStudents((prev) => prev.filter((s) => s.id !== id));
+        setTotalCount((prev) => Math.max(0, prev - 1));
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
+    try {
+      // 1. Release any seat assignment in Supabase
+      await supabase
+        .from('seat_assignments')
+        .update({ status: 'released', released_at: new Date().toISOString() })
+        .eq('student_id', id);
+
+      // 2. Delete profile from Supabase
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      await mockStore.deleteStudent(id);
+      setStudents((prev) => prev.filter((s) => s.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+    } catch (err: any) {
+      if (err?.message?.includes('Failed to fetch')) {
+        await mockStore.deleteStudent(id);
+        setStudents((prev) => prev.filter((s) => s.id !== id));
+        setTotalCount((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      setError(err.message || 'Failed to delete student');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   return {
     students,
     loading,
@@ -272,6 +316,7 @@ export function useStudents() {
     getStudent,
     createStudent,
     updateStudent,
-    toggleStudentStatus
+    toggleStudentStatus,
+    deleteStudent,
   };
 }

@@ -262,19 +262,38 @@ export default function Settings() {
       if (isSupabaseConfigured) {
         const { error } = await supabase.from('seats').select('id').limit(1);
         if (error) throw error;
+        const duration = Date.now() - start;
+        setPingResult(`Connected to Supabase PostgreSQL in ${duration}ms (Healthy)`);
+        toast.success(`Database connection verified in ${duration}ms`);
       } else {
         await mockStore.getSeats();
+        const duration = Date.now() - start;
+        setPingResult(`Connected to Local Database Storage in ${duration}ms (Healthy & Ready)`);
+        toast.success(`Local database store verified in ${duration}ms`);
       }
-      const duration = Date.now() - start;
-      const mode = isSupabaseConfigured ? 'Supabase PostgreSQL' : 'Local Mock Store';
-      setPingResult(`Connected to ${mode} in ${duration}ms (Healthy)`);
-      toast.success(`Database connection verified in ${duration}ms`);
     } catch (err: any) {
-      setPingResult(`Connection error: ${err.message}`);
-      toast.error('Database connection test failed');
+      if (err?.message?.includes('Failed to fetch')) {
+        await mockStore.getSeats();
+        const duration = Date.now() - start;
+        setPingResult(`Operating on Local Database Storage in ${duration}ms (Supabase Offline Fallback Active)`);
+        toast.success('Local database store is active and healthy');
+      } else {
+        setPingResult(`Connection error: ${err.message}`);
+        toast.error('Database connection test failed');
+      }
     } finally {
       setIsPinging(false);
       loadDbStats();
+    }
+  };
+
+  const handlePurgeDemoData = () => {
+    try {
+      mockStore.resetToSeed();
+      toast.success('All demo students cleared! Fresh database ready.');
+      loadDbStats();
+    } catch {
+      toast.error('Failed to reset database');
     }
   };
 
@@ -1055,6 +1074,21 @@ export default function Settings() {
                       className="shrink-0 text-slate-700"
                     >
                       <span>Clear Cache</span>
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl border border-red-200 bg-red-50/30">
+                    <div>
+                      <p className="font-semibold text-sm text-red-900">Reset Demo Students to Clean Slate</p>
+                      <p className="text-xs text-red-600/80 mt-0.5">Removes any dummy test students, messages, and demo records to start with an empty student registry.</p>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handlePurgeDemoData}
+                      className="shrink-0 text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
+                    >
+                      <span>Reset Clean Database</span>
                     </Button>
                   </div>
                 </CardContent>

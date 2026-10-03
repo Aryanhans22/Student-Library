@@ -12,13 +12,13 @@ import { Badge } from '../../components/ui/Badge';
 import { Avatar } from '../../components/ui/Avatar';
 import { formatDate, getInitials, cn } from '../../lib/utils';
 import type { AccountStatus } from '../../types/database';
-import { Eye, Edit, Armchair, Plus, Search, FilterX, ArrowUp, ArrowDown } from 'lucide-react';
+import { Eye, Edit, Armchair, Plus, Search, FilterX, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function Students() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { students, total, loading, fetchStudents, createStudent, updateStudent } = useStudents();
+  const { students, total, loading, fetchStudents, createStudent, updateStudent, deleteStudent } = useStudents();
 
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
@@ -55,6 +55,12 @@ export default function Students() {
     student: null,
     action: 'activate'
   });
+
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<{ isOpen: boolean; student: any }>({
+    isOpen: false,
+    student: null,
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (searchParams.get('add') === 'true') {
@@ -150,6 +156,21 @@ export default function Students() {
       fetchStudents({ page, limit: pageSize, search, status: statusFilter, sortBy: sortField, sortOrder: sortDirection });
     } catch (error: any) {
       toast.error(error.message || 'Failed to update status');
+    }
+  };
+
+  const handleDeleteStudent = async () => {
+    if (!deleteConfirmDialog.student) return;
+    try {
+      setIsDeleting(true);
+      await deleteStudent(deleteConfirmDialog.student.id);
+      toast.success(`Student ${deleteConfirmDialog.student.full_name} deleted successfully`);
+      setDeleteConfirmDialog({ isOpen: false, student: null });
+      fetchStudents({ page, limit: pageSize, search, status: statusFilter, sortBy: sortField, sortOrder: sortDirection });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete student');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -299,6 +320,18 @@ export default function Students() {
                         >
                           {student.status === 'active' ? 'Deactivate' : 'Activate'}
                         </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                          title="Delete Student"
+                          onClick={() => setDeleteConfirmDialog({
+                            isOpen: true,
+                            student,
+                          })}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -391,6 +424,17 @@ export default function Students() {
         confirmText={`Yes, ${confirmDialog.action}`}
         cancelText="Cancel"
         type={confirmDialog.action === 'deactivate' ? 'danger' : 'info'}
+      />
+
+      <ConfirmDialog
+        isOpen={deleteConfirmDialog.isOpen}
+        onClose={() => setDeleteConfirmDialog({ isOpen: false, student: null })}
+        onConfirm={handleDeleteStudent}
+        title="Delete Student Record"
+        message={`Are you sure you want to permanently delete "${deleteConfirmDialog.student?.full_name}" (${deleteConfirmDialog.student?.student_id || 'No ID'})? Any assigned desk will be released and records cleared.`}
+        confirmText={isDeleting ? 'Deleting...' : 'Delete Student'}
+        cancelText="Cancel"
+        type="danger"
       />
     </div>
   );

@@ -17,7 +17,7 @@ const STORAGE_KEYS = {
   DEMO_BOOKINGS: 'libraryms_demo_bookings',
 };
 
-// Initial Seed Data
+// Initial Seed Data - Clean Initial State (Demo students removed)
 const SEED_PROFILES: Profile[] = [
   {
     id: 'a0000000-0000-0000-0000-000000000001',
@@ -35,292 +35,33 @@ const SEED_PROFILES: Profile[] = [
     created_at: '2026-01-10T08:00:00.000Z',
     updated_at: '2026-01-10T08:00:00.000Z',
   },
-  {
-    id: 's0000000-0000-0000-0000-000000000001',
-    auth_user_id: 'auth_student_001',
-    role: 'student',
-    full_name: 'Aarav Sharma',
-    email: 'aarav.sharma@example.com',
-    phone: '+91 9823456789',
-    student_id: 'STU202601',
-    date_of_birth: '2004-05-14',
-    address: '42 Lotus Enclave, New Delhi',
-    emergency_contact: '+91 9823456780',
-    profile_image_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=250',
-    status: 'active',
-    created_at: '2026-02-01T10:30:00.000Z',
-    updated_at: '2026-02-01T10:30:00.000Z',
-  },
-  {
-    id: 's0000000-0000-0000-0000-000000000002',
-    auth_user_id: 'auth_student_002',
-    role: 'student',
-    full_name: 'Diya Patel',
-    email: 'diya.patel@example.com',
-    phone: '+91 9712345678',
-    student_id: 'STU202602',
-    date_of_birth: '2003-11-28',
-    address: '15 Gandhi Marg, Ahmedabad',
-    emergency_contact: '+91 9712345670',
-    profile_image_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=250',
-    status: 'active',
-    created_at: '2026-02-05T14:15:00.000Z',
-    updated_at: '2026-02-05T14:15:00.000Z',
-  },
-  {
-    id: 's0000000-0000-0000-0000-000000000003',
-    auth_user_id: 'auth_student_003',
-    role: 'student',
-    full_name: 'Vihaan Singh',
-    email: 'vihaan.singh@example.com',
-    phone: '+91 9845678901',
-    student_id: 'STU202603',
-    date_of_birth: '2005-01-20',
-    address: '77 Civil Lines, Jaipur',
-    emergency_contact: '+91 9845678900',
-    profile_image_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=250',
-    status: 'active',
-    created_at: '2026-02-12T09:00:00.000Z',
-    updated_at: '2026-02-12T09:00:00.000Z',
-  },
-  {
-    id: 's0000000-0000-0000-0000-000000000004',
-    auth_user_id: 'auth_student_004',
-    role: 'student',
-    full_name: 'Ananya Gupta',
-    email: 'ananya.gupta@example.com',
-    phone: '+91 9934567890',
-    student_id: 'STU202604',
-    date_of_birth: '2004-09-08',
-    address: '88 Park Street, Kolkata',
-    emergency_contact: '+91 9934567891',
-    profile_image_url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=250',
-    status: 'active',
-    created_at: '2026-02-20T16:45:00.000Z',
-    updated_at: '2026-02-20T16:45:00.000Z',
-  },
-  {
-    id: 's0000000-0000-0000-0000-000000000005',
-    auth_user_id: 'auth_student_005',
-    role: 'student',
-    full_name: 'Rohan Desai',
-    email: 'rohan.desai@example.com',
-    phone: '+91 9876123450',
-    student_id: 'STU202605',
-    date_of_birth: '2003-07-03',
-    address: '12 Marine Drive, Mumbai',
-    emergency_contact: '+91 9876123459',
-    profile_image_url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=250',
-    status: 'active',
-    created_at: '2026-03-01T11:20:00.000Z',
-    updated_at: '2026-03-01T11:20:00.000Z',
-  },
 ];
 
 const SEED_SEATS: Seat[] = [
   // Section A, Ground Floor
-  { id: 'seat_a01', seat_number: 'A01', floor: 'Ground Floor', section: 'A', row_number: 1, column_number: 1, status: 'occupied', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  { id: 'seat_a01', seat_number: 'A01', floor: 'Ground Floor', section: 'A', row_number: 1, column_number: 1, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_a02', seat_number: 'A02', floor: 'Ground Floor', section: 'A', row_number: 1, column_number: 2, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_a03', seat_number: 'A03', floor: 'Ground Floor', section: 'A', row_number: 1, column_number: 3, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_a04', seat_number: 'A04', floor: 'Ground Floor', section: 'A', row_number: 2, column_number: 1, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
-  { id: 'seat_a05', seat_number: 'A05', floor: 'Ground Floor', section: 'A', row_number: 2, column_number: 2, status: 'maintenance', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  { id: 'seat_a05', seat_number: 'A05', floor: 'Ground Floor', section: 'A', row_number: 2, column_number: 2, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_a06', seat_number: 'A06', floor: 'Ground Floor', section: 'A', row_number: 2, column_number: 3, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
 
   // Section B, First Floor
   { id: 'seat_b01', seat_number: 'B01', floor: 'First Floor', section: 'B', row_number: 1, column_number: 1, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_b02', seat_number: 'B02', floor: 'First Floor', section: 'B', row_number: 1, column_number: 2, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
-  { id: 'seat_b03', seat_number: 'B03', floor: 'First Floor', section: 'B', row_number: 1, column_number: 3, status: 'occupied', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  { id: 'seat_b03', seat_number: 'B03', floor: 'First Floor', section: 'B', row_number: 1, column_number: 3, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_b04', seat_number: 'B04', floor: 'First Floor', section: 'B', row_number: 2, column_number: 1, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'seat_b05', seat_number: 'B05', floor: 'First Floor', section: 'B', row_number: 2, column_number: 2, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
-  { id: 'seat_b06', seat_number: 'B06', floor: 'First Floor', section: 'B', row_number: 2, column_number: 3, status: 'disabled', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  { id: 'seat_b06', seat_number: 'B06', floor: 'First Floor', section: 'B', row_number: 2, column_number: 3, status: 'available', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
 ];
 
-const SEED_ASSIGNMENTS: SeatAssignment[] = [
-  {
-    id: 'asgn_001',
-    student_id: 's0000000-0000-0000-0000-000000000001',
-    seat_id: 'seat_a01',
-    assigned_by: 'a0000000-0000-0000-0000-000000000001',
-    assigned_at: '2026-02-15T09:00:00.000Z',
-    released_at: null,
-    status: 'active',
-    created_at: '2026-02-15T09:00:00.000Z',
-    updated_at: '2026-02-15T09:00:00.000Z',
-  },
-  {
-    id: 'asgn_002',
-    student_id: 's0000000-0000-0000-0000-000000000002',
-    seat_id: 'seat_b03',
-    assigned_by: 'a0000000-0000-0000-0000-000000000001',
-    assigned_at: '2026-02-18T14:30:00.000Z',
-    released_at: null,
-    status: 'active',
-    created_at: '2026-02-18T14:30:00.000Z',
-    updated_at: '2026-02-18T14:30:00.000Z',
-  },
-];
+const SEED_ASSIGNMENTS: SeatAssignment[] = [];
 
-const SEED_SUBSCRIPTIONS: StudentSubscription[] = [
-  {
-    id: 'sub_001',
-    student_id: 's0000000-0000-0000-0000-000000000001', // Aarav Sharma
-    plan_name: 'Monthly Study Pass',
-    amount_paid: 999,
-    start_date: new Date(Date.now() - 27 * 86400000).toISOString().slice(0, 10),
-    end_date: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10), // Expiring in 3 days!
-    status: 'expiring_soon',
-    auto_renew: true,
-    created_at: new Date(Date.now() - 27 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_002',
-    student_id: 's0000000-0000-0000-0000-000000000002', // Diya Patel
-    plan_name: 'Quarterly Focus Pro',
-    amount_paid: 2499,
-    start_date: new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10),
-    end_date: new Date(Date.now() + 75 * 86400000).toISOString().slice(0, 10),
-    status: 'active',
-    auto_renew: false,
-    created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_003',
-    student_id: 's0000000-0000-0000-0000-000000000003', // Vihaan Singh
-    plan_name: 'Annual Scholar All-Access',
-    amount_paid: 7999,
-    start_date: new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10),
-    end_date: new Date(Date.now() + 305 * 86400000).toISOString().slice(0, 10),
-    status: 'active',
-    auto_renew: true,
-    created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_004',
-    student_id: 's0000000-0000-0000-0000-000000000004', // Ananya Gupta
-    plan_name: 'Monthly Study Pass',
-    amount_paid: 999,
-    start_date: new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10),
-    end_date: new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10), // Expired!
-    status: 'expired',
-    auto_renew: false,
-    created_at: new Date(Date.now() - 40 * 86400000).toISOString(),
-  },
-  {
-    id: 'sub_005',
-    student_id: 's0000000-0000-0000-0000-000000000005', // Rohan Desai
-    plan_name: 'Monthly Study Pass',
-    amount_paid: 999,
-    start_date: new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10),
-    end_date: new Date(Date.now() + 25 * 86400000).toISOString().slice(0, 10),
-    status: 'active',
-    auto_renew: true,
-    created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
-  }
-];
+const SEED_SUBSCRIPTIONS: StudentSubscription[] = [];
 
-const SEED_MESSAGES: ChatMessage[] = [
-  {
-    id: 'msg_001',
-    sender_id: 's0000000-0000-0000-0000-000000000001', // Aarav Sharma
-    receiver_id: 'a0000000-0000-0000-0000-000000000001', // Admin
-    message: 'Hello Admin, will the silent sanctuary zone remain open during examination week?',
-    is_read: true,
-    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-  },
-  {
-    id: 'msg_002',
-    sender_id: 'a0000000-0000-0000-0000-000000000001', // Admin
-    receiver_id: 's0000000-0000-0000-0000-000000000001', // Aarav Sharma
-    message: 'Hi Aarav! Yes, the silent sanctuary is open 24/7 with high-speed WiFi and active desk power sockets.',
-    is_read: true,
-    created_at: new Date(Date.now() - 3600000 * 22).toISOString(),
-  },
-  {
-    id: 'msg_003',
-    sender_id: 's0000000-0000-0000-0000-000000000002', // Diya Patel
-    receiver_id: 'a0000000-0000-0000-0000-000000000001', // Admin
-    message: 'Good morning! Can I request locker allocation near desk B03?',
-    is_read: false,
-    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-  },
-  {
-    id: 'msg_004',
-    sender_id: 's0000000-0000-0000-0000-000000000003', // Vihaan Singh
-    receiver_id: 'a0000000-0000-0000-0000-000000000001', // Admin
-    message: 'Hi Admin, desk A06 power socket is working great. Thank you!',
-    is_read: true,
-    created_at: new Date(Date.now() - 3600000 * 18).toISOString(),
-  },
-  {
-    id: 'msg_005',
-    sender_id: 's0000000-0000-0000-0000-000000000004', // Ananya Gupta
-    receiver_id: 'a0000000-0000-0000-0000-000000000001', // Admin
-    message: 'Hello! My monthly pass has expired. How can I renew to retain my desk?',
-    is_read: false,
-    created_at: new Date(Date.now() - 3600000 * 6).toISOString(),
-  },
-  {
-    id: 'msg_006',
-    sender_id: 's0000000-0000-0000-0000-000000000005', // Rohan Desai
-    receiver_id: 'a0000000-0000-0000-0000-000000000001', // Admin
-    message: 'Good evening! Can I upgrade my monthly plan to quarterly next week?',
-    is_read: true,
-    created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-  }
-];
+const SEED_MESSAGES: ChatMessage[] = [];
 
-const SEED_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: 'notif_001',
-    user_id: 's0000000-0000-0000-0000-000000000001',
-    title: '⚠️ Subscription Expiring in 3 Days!',
-    message: 'Your Monthly Study Pass expires soon. Please renew to keep your reserved desk A01.',
-    type: 'subscription_expiry',
-    is_read: false,
-    link: '/student/dashboard',
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-  {
-    id: 'notif_002',
-    user_id: 's0000000-0000-0000-0000-000000000001',
-    title: '✅ Desk Allocated',
-    message: 'Desk A01 (Section A, Ground Floor) has been allocated to you.',
-    type: 'seat_allocated',
-    is_read: true,
-    link: '/student/dashboard',
-    created_at: new Date(Date.now() - 86400000 * 27).toISOString(),
-  },
-  {
-    id: 'notif_admin_001',
-    user_id: 'a0000000-0000-0000-0000-000000000001',
-    title: '💬 New Message from Diya Patel',
-    message: 'Can I request locker allocation near desk B03?',
-    type: 'chat_message',
-    is_read: false,
-    link: '/admin/messages?student=s0000000-0000-0000-0000-000000000002',
-    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-  },
-  {
-    id: 'notif_admin_002',
-    user_id: 'a0000000-0000-0000-0000-000000000001',
-    title: '⚠️ Aarav Sharma Expiring in 3 Days',
-    message: 'Monthly Study Pass expiring on desk A01. Send renewal reminder.',
-    type: 'subscription_expiry',
-    is_read: false,
-    link: '/admin/subscriptions',
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-  {
-    id: 'notif_admin_003',
-    user_id: 'a0000000-0000-0000-0000-000000000001',
-    title: '🔴 Ananya Gupta Plan Expired',
-    message: 'Membership has lapsed. Please check desk allocation.',
-    type: 'subscription_expiry',
-    is_read: true,
-    link: '/admin/subscriptions',
-    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
-  },
-];
+const SEED_NOTIFICATIONS: AppNotification[] = [];
 
 const SEED_DEMO_BOOKINGS: DemoBooking[] = [
   {
@@ -395,11 +136,6 @@ class MockDataStore {
         ? JSON.parse(storedPasswords)
         : {
             'admin@library.com': 'admin123',
-            'aarav.sharma@example.com': 'student123',
-            'diya.patel@example.com': 'student123',
-            'vihaan.singh@example.com': 'student123',
-            'ananya.gupta@example.com': 'student123',
-            'rohan.desai@example.com': 'student123',
           };
 
       const storedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
@@ -421,15 +157,7 @@ class MockDataStore {
       if (storedNotifs) {
         try {
           const parsed = JSON.parse(storedNotifs);
-          const hasAdmin = parsed.some((n: any) => n.user_id === 'a0000000-0000-0000-0000-000000000001');
-          if (!hasAdmin) {
-            this.notifications = [
-              ...parsed,
-              ...SEED_NOTIFICATIONS.filter((n) => n.user_id === 'a0000000-0000-0000-0000-000000000001'),
-            ];
-          } else {
-            this.notifications = parsed;
-          }
+          this.notifications = Array.isArray(parsed) ? parsed : [...SEED_NOTIFICATIONS];
         } catch {
           this.notifications = [...SEED_NOTIFICATIONS];
         }
@@ -442,6 +170,33 @@ class MockDataStore {
 
       const storedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
       this.currentUser = storedUser ? JSON.parse(storedUser) : null;
+
+      // Auto-purge any legacy demo students from previous sessions
+      this.profiles = this.profiles.filter(
+        (p) => p.role === 'admin' || (!p.email.toLowerCase().endsWith('@example.com') && !p.id.startsWith('s0000000-0000'))
+      );
+      this.assignments = this.assignments.filter(
+        (a) => !a.student_id.startsWith('s0000000-0000') && this.profiles.some((p) => p.id === a.student_id)
+      );
+      this.subscriptions = this.subscriptions.filter(
+        (s) => !s.student_id.startsWith('s0000000-0000') && this.profiles.some((p) => p.id === s.student_id)
+      );
+      this.messages = this.messages.filter(
+        (m) =>
+          !m.sender_id.startsWith('s0000000-0000') &&
+          !m.receiver_id.startsWith('s0000000-0000')
+      );
+      this.notifications = this.notifications.filter((n) => !n.user_id.startsWith('s0000000-0000'));
+
+      // Ensure all unassigned seats are marked available
+      this.seats.forEach((seat) => {
+        const hasActiveAssignment = this.assignments.some(
+          (a) => a.seat_id === seat.id && a.status === 'active'
+        );
+        if (!hasActiveAssignment && seat.status === 'occupied') {
+          seat.status = 'available';
+        }
+      });
 
       this.checkAndGenerateExpiryNotifications();
       this.persist();
@@ -693,18 +448,51 @@ class MockDataStore {
   }
 
   getAllStudents(): Profile[] {
-    let students = this.profiles.filter((p) => p.role === 'student');
-    if (students.length === 0) {
-      const seedStudents = SEED_PROFILES.filter((p) => p.role === 'student');
-      this.profiles.push(...seedStudents);
-      this.persist();
-      students = seedStudents;
-    }
-    return students;
+    return this.profiles.filter((p) => p.role === 'student');
   }
 
   getAllProfiles(): Profile[] {
     return [...this.profiles];
+  }
+
+  async deleteStudent(studentId: string): Promise<void> {
+    await new Promise((r) => setTimeout(r, 120));
+    const student = this.profiles.find((p) => p.id === studentId);
+    if (!student) return;
+
+    // 1. Release active desk assignment
+    this.assignments.forEach((a) => {
+      if (a.student_id === studentId && a.status === 'active') {
+        a.status = 'released';
+        a.released_at = new Date().toISOString();
+        const seat = this.seats.find((s) => s.id === a.seat_id);
+        if (seat) {
+          seat.status = 'available';
+        }
+      }
+    });
+
+    // 2. Remove profile
+    this.profiles = this.profiles.filter((p) => p.id !== studentId);
+
+    // 3. Remove passwords
+    if (student.email) delete this.passwords[student.email.toLowerCase()];
+    if (student.student_id) delete this.passwords[student.student_id.toLowerCase()];
+
+    // 4. Remove subscriptions
+    this.subscriptions = this.subscriptions.filter((s) => s.student_id !== studentId);
+
+    // 5. Remove messages
+    this.messages = this.messages.filter(
+      (m) =>
+        m.sender_id !== studentId &&
+        m.receiver_id !== studentId
+    );
+
+    // 6. Remove notifications
+    this.notifications = this.notifications.filter((n) => n.user_id !== studentId);
+
+    this.persist();
   }
 
   syncProfiles(profiles: Profile[]): void {
@@ -1168,8 +956,8 @@ class MockDataStore {
     const newSub: StudentSubscription = {
       id: `sub_${Date.now()}`,
       student_id: data.student_id!,
-      plan_name: data.plan_name || 'Monthly Study Pass',
-      amount_paid: Number(data.amount_paid) || 999,
+      plan_name: data.plan_name || 'Full Day (12 Hours) - Monthly',
+      amount_paid: Number(data.amount_paid) || 1200,
       start_date: data.start_date || new Date().toISOString().slice(0, 10),
       end_date: data.end_date || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
       status: 'active',
@@ -1183,7 +971,7 @@ class MockDataStore {
     return newSub;
   }
 
-  async renewSubscription(subscriptionId: string, durationDays: number = 30, amountPaid: number = 999): Promise<StudentSubscription> {
+  async renewSubscription(subscriptionId: string, durationDays: number = 30, amountPaid: number = 1200): Promise<StudentSubscription> {
     await new Promise((r) => setTimeout(r, 150));
     const sub = this.subscriptions.find((s) => s.id === subscriptionId);
     if (!sub) throw new Error('Subscription not found');
