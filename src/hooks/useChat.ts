@@ -199,17 +199,8 @@ export function useChat() {
   // 5. Realtime Subscription
   useEffect(() => {
     if (!isSupabaseConfigured || !activeConversationId || activeConversationId.startsWith('mock_')) {
-       if (!isSupabaseConfigured) {
-          const handleStorage = (e: StorageEvent) => {
-            if (e.key === 'library_messages' && activeChatProfileRef.current) {
-               fetchMessages(activeChatProfileRef.current.otherUserId, activeChatProfileRef.current.currentUserId);
-               fetchConversations(activeChatProfileRef.current.currentUserId, 'admin'); // or student
-            }
-          };
-          window.addEventListener('storage', handleStorage);
-          return () => window.removeEventListener('storage', handleStorage);
-       }
-       return;
+      // No realtime needed for mock data or when Supabase is not configured
+      return;
     }
 
     const channel = supabase
@@ -220,6 +211,7 @@ export function useChat() {
         (payload) => {
           const newMsg = payload.new as ChatMessage;
           setMessages((prev) => {
+            // Avoid duplicate if optimistic UI already added the message
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
           });
@@ -230,7 +222,7 @@ export function useChat() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeConversationId, fetchMessages, fetchConversations]);
+  }, [activeConversationId]);
 
   return {
     messages,
