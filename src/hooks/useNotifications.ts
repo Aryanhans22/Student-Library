@@ -23,6 +23,14 @@ export function useNotifications(userId?: string) {
     }
 
     try {
+      // 1. Try to sync contextual notifications (welcome, expiry, unread chats)
+      try {
+        await supabase.rpc('check_and_sync_notifications');
+      } catch (_) {
+        // Function may not exist yet, continue safely
+      }
+
+      // 2. Fetch live notifications
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
@@ -30,18 +38,25 @@ export function useNotifications(userId?: string) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setNotifications(data || []);
+
+      if (data && data.length > 0) {
+        setNotifications(data);
+      } else {
+        // If DB has none yet, check mockStore fallback or seed initial
+        const fallback = await mockStore.getNotifications(targetId);
+        setNotifications(fallback || []);
+      }
     } catch (err: any) {
-      console.warn('Supabase fetchNotifications failed, falling back to mockStore:', err.message);
+      console.warn('Supabase fetchNotifications error, using mockStore fallback:', err.message);
       const fallback = await mockStore.getNotifications(targetId);
-      setNotifications(fallback);
+      setNotifications(fallback || []);
     } finally {
       setLoading(false);
     }
   }, [userId]);
 
   const markRead = useCallback(async (notificationId: string) => {
-    // Optimistic update
+    // Optimistic UI update
     setNotifications((prev) =>
       prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
     );
@@ -54,14 +69,40 @@ export function useNotifications(userId?: string) {
     try {
       await supabase.from('notifications').update({ is_read: true }).eq('id', notificationId);
     } catch (err) {
+      console.warn('markRead error, falling back:', err);
       await mockStore.markNotificationRead(notificationId);
     }
   }, []);
+
+  const markAllAsRead = useCallback(async (uid?: string) => {
+    const targetId = uid || userId;
+    if (!targetId) return;
+
+    // Optimistic update
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+
+    if (!isSupabaseConfigured) {
+      notifications.forEach((n) => mockStore.markNotificationRead(n.id));
+      return;
+    }
+
+    try {
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', targetId)
+        .eq('is_read', false);
+    } catch (err) {
+      console.warn('markAllAsRead error:', err);
+      notifications.forEach((n) => mockStore.markNotificationRead(n.id));
+    }
+  }, [userId, notifications]);
 
   const clearAll = useCallback(async (uid?: string) => {
     const targetId = uid || userId;
     if (!targetId) return;
 
+    // Optimistic clear
     setNotifications([]);
 
     if (!isSupabaseConfigured) {
@@ -70,8 +111,10 @@ export function useNotifications(userId?: string) {
     }
 
     try {
-      await supabase.from('notifications').delete().eq('user_id', targetId);
+      const { error } = await supabase.from('notifications').delete().eq('user_id', targetId);
+      if (error) throw error;
     } catch (err) {
+      console.warn('clearAll error:', err);
       await mockStore.clearAllNotifications(targetId);
     }
   }, [userId]);
@@ -81,17 +124,32 @@ export function useNotifications(userId?: string) {
       fetchNotifications(userId);
       
       if (isSupabaseConfigured) {
+        // Listen to all real-time changes on public.notifications for this user
         const channel = supabase
-          .channel(`notifs_${userId}`)
+          .channel(`notifs_realtime_${userId}`)
           .on(
             'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+            { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
             (payload) => {
-              const newNotif = payload.new as AppNotification;
-              setNotifications((prev) => {
-                if (prev.some((n) => n.id === newNotif.id)) return prev;
-                return [newNotif, ...prev];
-              });
+              if (payload.eventType === 'INSERT') {
+                const newNotif = payload.new as AppNotification;
+                setNotifications((prev) => {
+                  if (prev.some((n) => n.id === newNotif.id)) return prev;
+                  return [newNotif, ...prev];
+                });
+              } else if (payload.eventType === 'UPDATE') {
+                const updated = payload.new as AppNotification;
+                setNotifications((prev) =>
+                  prev.map((n) => (n.id === updated.id ? updated : n))
+                );
+              } else if (payload.eventType === 'DELETE') {
+                const deletedId = (payload.old as any)?.id;
+                if (deletedId) {
+                  setNotifications((prev) => prev.filter((n) => n.id !== deletedId));
+                } else {
+                  setNotifications([]);
+                }
+              }
             }
           )
           .subscribe();
@@ -100,10 +158,10 @@ export function useNotifications(userId?: string) {
           supabase.removeChannel(channel);
         };
       } else {
-        // MockStore realtime: listen to cross-tab localStorage changes
+        // MockStore cross-tab storage sync
         const handleStorageChange = (e: StorageEvent) => {
           if (e.key === 'library_notifications') {
-            mockStore.getNotifications(userId).then(notifs => setNotifications(notifs));
+            mockStore.getNotifications(userId).then((notifs) => setNotifications(notifs));
           }
         };
         
@@ -123,6 +181,7 @@ export function useNotifications(userId?: string) {
     loading,
     fetchNotifications,
     markRead,
+    markAllAsRead,
     clearAll,
   };
 }

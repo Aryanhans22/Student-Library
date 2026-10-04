@@ -1,5 +1,5 @@
 -- ============================================================================
--- FIX STUDENT REGISTRATION, DELETION & ORPHANED AUTH PURGE (V3)
+-- FULL FIX: REGISTRATION, DELETION, ORPHAN PURGE & NOTIFICATION ENGINE (V4)
 -- Run this in the Supabase Dashboard SQL Editor
 -- ============================================================================
 
@@ -60,7 +60,7 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_new_user();
 
--- 3. ENSURE SUBSCRIPTIONS & NOTIFICATIONS TABLES EXIST
+-- 3. ENSURE SUBSCRIPTIONS TABLE EXISTS WITH RLS
 CREATE TABLE IF NOT EXISTS public.subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -92,6 +92,7 @@ CREATE POLICY "Students can view own subscription" ON public.subscriptions
 CREATE POLICY "Admins can manage all subscriptions" ON public.subscriptions
     FOR ALL USING (public.is_admin());
 
+-- 4. ENSURE NOTIFICATIONS TABLE EXISTS WITH COMPLETE RLS & REALTIME
 CREATE TABLE IF NOT EXISTS public.notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -103,13 +104,23 @@ CREATE TABLE IF NOT EXISTS public.notifications (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON public.notifications(is_read);
+
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications REPLICA IDENTITY FULL;
 
 DO $$
+DECLARE
+    pol RECORD;
 BEGIN
-    DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
-    DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
-EXCEPTION WHEN OTHERS THEN NULL;
+    FOR pol IN 
+        SELECT policyname 
+        FROM pg_policies 
+        WHERE tablename = 'notifications' AND schemaname = 'public'
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.notifications', pol.policyname);
+    END LOOP;
 END $$;
 
 CREATE POLICY "Users can view own notifications" ON public.notifications
@@ -118,13 +129,291 @@ CREATE POLICY "Users can view own notifications" ON public.notifications
         public.is_admin()
     );
 
+CREATE POLICY "Users and admins can insert notifications" ON public.notifications
+    FOR INSERT WITH CHECK (
+        auth.uid() IS NOT NULL OR public.is_admin()
+    );
+
 CREATE POLICY "Users can update own notifications" ON public.notifications
     FOR UPDATE USING (
         user_id IN (SELECT id FROM public.profiles WHERE auth_user_id = auth.uid()) OR
         public.is_admin()
     );
 
--- 4. CLEANLY RE-CREATE RLS POLICIES ON profiles (NO DUPLICATE ERRORS)
+CREATE POLICY "Users can delete own notifications" ON public.notifications
+    FOR DELETE USING (
+        user_id IN (SELECT id FROM public.profiles WHERE auth_user_id = auth.uid()) OR
+        public.is_admin()
+    );
+
+-- Enable Realtime publication on notifications
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- 5. AUTOMATED NOTIFICATION TRIGGERS
+-- A. Trigger when a chat message is sent
+CREATE OR REPLACE FUNCTION public.tr_notify_on_new_message()
+RETURNS trigger
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_sender_name TEXT;
+    v_sender_role public.user_role;
+    v_target_user_id UUID;
+    admin_rec RECORD;
+BEGIN
+    SELECT full_name, role INTO v_sender_name, v_sender_role 
+    FROM public.profiles 
+    WHERE id = NEW.sender_id;
+
+    IF v_sender_role = 'student' THEN
+        FOR admin_rec IN SELECT id FROM public.profiles WHERE role = 'admin'::public.user_role LOOP
+            INSERT INTO public.notifications (user_id, title, message, type, link)
+            VALUES (
+                admin_rec.id,
+                'New Message from ' || COALESCE(v_sender_name, 'Student'),
+                substring(NEW.message from 1 for 120),
+                'chat_message',
+                '/admin/messages'
+            );
+        END LOOP;
+    ELSE
+        SELECT student_id INTO v_target_user_id 
+        FROM public.conversations 
+        WHERE id = NEW.conversation_id;
+
+        IF v_target_user_id IS NOT NULL THEN
+            INSERT INTO public.notifications (user_id, title, message, type, link)
+            VALUES (
+                v_target_user_id,
+                'Helpdesk Reply from ' || COALESCE(v_sender_name, 'Admin'),
+                substring(NEW.message from 1 for 120),
+                'chat_message',
+                '/student/chat'
+            );
+        END IF;
+    END IF;
+
+    RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_messages_notify ON public.messages;
+CREATE TRIGGER tr_messages_notify
+    AFTER INSERT ON public.messages
+    FOR EACH ROW
+    EXECUTE FUNCTION public.tr_notify_on_new_message();
+
+-- B. Trigger when a seat is allocated or released
+CREATE OR REPLACE FUNCTION public.tr_notify_on_seat_assignment()
+RETURNS trigger
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_seat_number TEXT;
+BEGIN
+    SELECT seat_number INTO v_seat_number FROM public.seats WHERE id = NEW.seat_id;
+
+    IF TG_OP = 'INSERT' AND NEW.status = 'active'::public.assignment_status THEN
+        INSERT INTO public.notifications (user_id, title, message, type, link)
+        VALUES (
+            NEW.student_id,
+            'Seat Allocated 🎉',
+            'Seat ' || COALESCE(v_seat_number, '') || ' has been allocated to you. View your digital pass on dashboard.',
+            'seat_allocated',
+            '/student/dashboard'
+        );
+    ELSIF TG_OP = 'UPDATE' AND OLD.status = 'active'::public.assignment_status AND NEW.status = 'released'::public.assignment_status THEN
+        INSERT INTO public.notifications (user_id, title, message, type, link)
+        VALUES (
+            NEW.student_id,
+            'Seat Released',
+            'Your allocation for Seat ' || COALESCE(v_seat_number, '') || ' has ended.',
+            'seat_released',
+            '/student/dashboard'
+        );
+    END IF;
+
+    RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_seat_assignments_notify ON public.seat_assignments;
+CREATE TRIGGER tr_seat_assignments_notify
+    AFTER INSERT OR UPDATE ON public.seat_assignments
+    FOR EACH ROW
+    EXECUTE FUNCTION public.tr_notify_on_seat_assignment();
+
+-- C. Trigger when a new student registers (notifies admin)
+CREATE OR REPLACE FUNCTION public.tr_notify_on_new_student()
+RETURNS trigger
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    admin_rec RECORD;
+BEGIN
+    IF NEW.role = 'student'::public.user_role THEN
+        FOR admin_rec IN SELECT id FROM public.profiles WHERE role = 'admin'::public.user_role LOOP
+            INSERT INTO public.notifications (user_id, title, message, type, link)
+            VALUES (
+                admin_rec.id,
+                'New Student Registered',
+                NEW.full_name || ' (' || NEW.email || ') joined the library system.',
+                'system',
+                '/admin/students'
+            );
+        END LOOP;
+    END IF;
+
+    RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_profiles_notify ON public.profiles;
+CREATE TRIGGER tr_profiles_notify
+    AFTER INSERT ON public.profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION public.tr_notify_on_new_student();
+
+-- D. RPC to sync and generate contextual notifications (Welcome, Desk status, Expiring warnings)
+CREATE OR REPLACE FUNCTION public.check_and_sync_notifications()
+RETURNS JSON AS $$
+DECLARE
+    v_user_id UUID;
+    v_role public.user_role;
+    v_count INT := 0;
+    v_seat_number TEXT;
+    v_days_left INT;
+    v_end_date DATE;
+    v_unread_chats INT;
+BEGIN
+    SELECT id, role INTO v_user_id, v_role 
+    FROM public.profiles 
+    WHERE auth_user_id = auth.uid();
+
+    IF v_user_id IS NULL THEN
+        RETURN json_build_object('success', false, 'error', 'Profile not found');
+    END IF;
+
+    IF v_role = 'student' THEN
+        -- 1. Ensure welcome notification exists
+        IF NOT EXISTS (SELECT 1 FROM public.notifications WHERE user_id = v_user_id AND type = 'system') THEN
+            INSERT INTO public.notifications (user_id, title, message, type, link)
+            VALUES (
+                v_user_id,
+                'Welcome to Central Study Centre! 📚',
+                'Your student account is active. Check your digital seat pass and live helpdesk.',
+                'system',
+                '/student/dashboard'
+            );
+            v_count := v_count + 1;
+        END IF;
+
+        -- 2. Check allocated seat notification
+        IF to_regclass('public.seat_assignments') IS NOT NULL AND to_regclass('public.seats') IS NOT NULL THEN
+            SELECT s.seat_number INTO v_seat_number
+            FROM public.seat_assignments sa
+            JOIN public.seats s ON s.id = sa.seat_id
+            WHERE sa.student_id = v_user_id AND sa.status = 'active'::public.assignment_status
+            LIMIT 1;
+
+            IF v_seat_number IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM public.notifications WHERE user_id = v_user_id AND type = 'seat_allocated'
+            ) THEN
+                INSERT INTO public.notifications (user_id, title, message, type, link)
+                VALUES (
+                    v_user_id,
+                    'Active Desk Assigned: ' || v_seat_number,
+                    'You have an allocated desk in the library. View your live pass on dashboard.',
+                    'seat_allocated',
+                    '/student/dashboard'
+                );
+                v_count := v_count + 1;
+            END IF;
+        END IF;
+
+        -- 3. Check expiring subscription (within 5 days)
+        IF to_regclass('public.subscriptions') IS NOT NULL THEN
+            SELECT (end_date - CURRENT_DATE), end_date INTO v_days_left, v_end_date
+            FROM public.subscriptions
+            WHERE student_id = v_user_id AND status = 'active'
+            ORDER BY end_date ASC
+            LIMIT 1;
+
+            IF v_days_left IS NOT NULL AND v_days_left <= 5 AND NOT EXISTS (
+                SELECT 1 FROM public.notifications 
+                WHERE user_id = v_user_id AND type = 'subscription_expiry' AND created_at > (now() - INTERVAL '3 days')
+            ) THEN
+                INSERT INTO public.notifications (user_id, title, message, type, link)
+                VALUES (
+                    v_user_id,
+                    'Subscription Expiring Soon',
+                    'Your membership ends on ' || to_char(v_end_date, 'Mon DD, YYYY') || ' (' || v_days_left || ' days remaining). Contact admin to renew.',
+                    'subscription_expiry',
+                    '/student/chat'
+                );
+                v_count := v_count + 1;
+            END IF;
+        END IF;
+
+    ELSE
+        -- Admin: Welcome / System Ready
+        IF NOT EXISTS (SELECT 1 FROM public.notifications WHERE user_id = v_user_id AND type = 'system') THEN
+            INSERT INTO public.notifications (user_id, title, message, type, link)
+            VALUES (
+                v_user_id,
+                'LibraryMS Admin Console Ready',
+                'Real-time seat monitoring, student records, and instant helpdesk chat are online.',
+                'system',
+                '/admin/dashboard'
+            );
+            v_count := v_count + 1;
+        END IF;
+
+        -- Check unread student messages
+        IF to_regclass('public.conversations') IS NOT NULL THEN
+            SELECT COALESCE(SUM(unread_by_admin), 0) INTO v_unread_chats
+            FROM public.conversations;
+
+            IF v_unread_chats > 0 AND NOT EXISTS (
+                SELECT 1 FROM public.notifications 
+                WHERE user_id = v_user_id AND type = 'chat_message' AND created_at > (now() - INTERVAL '1 hour')
+            ) THEN
+                INSERT INTO public.notifications (user_id, title, message, type, link)
+                VALUES (
+                    v_user_id,
+                    'Unread Student Messages',
+                    v_unread_chats || ' unread message(s) awaiting your response in Helpdesk & Chat.',
+                    'chat_message',
+                    '/admin/messages'
+                );
+                v_count := v_count + 1;
+            END IF;
+        END IF;
+    END IF;
+
+    RETURN json_build_object('success', true, 'synced_count', v_count);
+EXCEPTION WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', SQLERRM);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 6. CLEANLY RE-CREATE RLS POLICIES ON profiles (NO DUPLICATE ERRORS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DO $$
@@ -155,8 +444,7 @@ CREATE POLICY "Enable insert for user registration" ON public.profiles
 CREATE POLICY "Admins can delete profiles" ON public.profiles
     FOR DELETE USING (public.is_admin());
 
--- 5. SECURE TRANSACTIONAL FUNCTION TO DELETE STUDENT ACCOUNTS
--- Wipes seat assignments, messages, profile, AND auth.users record completely
+-- 7. SECURE TRANSACTIONAL FUNCTION TO DELETE STUDENT ACCOUNTS
 CREATE OR REPLACE FUNCTION public.delete_student_account(p_student_id UUID)
 RETURNS JSON AS $$
 DECLARE
@@ -266,8 +554,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 6. PURGE ORPHANED AUTH USERS FUNCTION
--- Allows registration to clean up abandoned auth.users if no profile exists
+-- 8. PURGE ORPHANED AUTH USERS FUNCTION
 CREATE OR REPLACE FUNCTION public.purge_orphaned_auth_user(p_email TEXT)
 RETURNS JSON AS $$
 DECLARE
@@ -282,7 +569,6 @@ BEGIN
         RETURN json_build_object('success', false, 'error', 'Cannot purge admin user');
     END IF;
 
-    -- Check if an active profile exists
     SELECT EXISTS (
         SELECT 1 FROM public.profiles WHERE LOWER(email) = LOWER(TRIM(p_email))
     ) INTO v_profile_exists;
@@ -291,7 +577,6 @@ BEGIN
         RETURN json_build_object('success', false, 'reason', 'profile_exists');
     END IF;
 
-    -- Delete any leftover auth user with this email
     WITH deleted AS (
         DELETE FROM auth.users 
         WHERE LOWER(email) = LOWER(TRIM(p_email))
@@ -306,8 +591,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 7. CLEAN UP ALL EXISTING ORPHANED AUTH USERS IMMEDIATELY
--- Deletes any auth.users entry that has no active record in public.profiles
+-- 9. CLEAN UP ALL EXISTING ORPHANED AUTH USERS IMMEDIATELY
 DELETE FROM auth.users u
 WHERE NOT EXISTS (
     SELECT 1 FROM public.profiles p WHERE p.auth_user_id = u.id OR LOWER(p.email) = LOWER(u.email)

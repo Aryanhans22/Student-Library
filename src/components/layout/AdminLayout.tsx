@@ -83,7 +83,7 @@ export default function AdminLayout() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col w-0 overflow-hidden">
         {/* Top Navigation */}
-        <header className="flex-shrink-0 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6">
+        <header className="flex-shrink-0 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6 relative z-30">
           <div className="flex items-center gap-4">
             <button
               onClick={() => setSidebarOpen(true)}
