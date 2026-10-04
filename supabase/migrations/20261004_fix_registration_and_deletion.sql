@@ -117,11 +117,13 @@ CREATE POLICY "Users can update own notifications" ON public.notifications
 -- 4. ENSURE RLS POLICIES ON profiles ALLOW PROPER INSERT & DELETE
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Users can INSERT their own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Enable insert for authenticated users or service" ON public.profiles;
-DROP POLICY IF EXISTS "Enable insert for user registration" ON public.profiles;
+DROP POLICY IF EXISTS "Admins can delete profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can DELETE profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can delete any profile" ON public.profiles;
+DROP POLICY IF EXISTS "Enable insert for user registration" ON public.profiles;
+DROP POLICY IF EXISTS "Enable insert for authenticated users or service" ON public.profiles;
+DROP POLICY IF EXISTS "Users can INSERT their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
 
 CREATE POLICY "Enable insert for user registration" ON public.profiles
     FOR INSERT WITH CHECK (
