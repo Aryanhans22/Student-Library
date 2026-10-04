@@ -286,42 +286,60 @@ export function useStudents() {
         return;
       }
 
-      if (data && !data.success && !rpcErr) {
-        throw new Error(data.error || 'Failed to delete student');
-      }
+      console.warn('delete_student_account RPC did not succeed, proceeding with fallback deletion:', data?.error || rpcErr?.message);
 
-      // 2. Fallback: manual sequential deletion if RPC is not yet created
-      // A. Release active seat
-      const { data: activeAssignment } = await supabase
-        .from('seat_assignments')
-        .select('seat_id')
-        .eq('student_id', id)
-        .eq('status', 'active')
-        .maybeSingle();
+      // 2. Fallback: manual sequential deletion if RPC is not yet created or returns error
+      try {
+        const { data: activeAssignment } = await supabase
+          .from('seat_assignments')
+          .select('seat_id')
+          .eq('student_id', id)
+          .eq('status', 'active')
+          .maybeSingle();
 
-      if (activeAssignment?.seat_id) {
+        if (activeAssignment?.seat_id) {
+          await supabase
+            .from('seats')
+            .update({ status: 'available' })
+            .eq('id', activeAssignment.seat_id);
+        }
+
         await supabase
-          .from('seats')
-          .update({ status: 'available' })
-          .eq('id', activeAssignment.seat_id);
+          .from('seat_assignments')
+          .delete()
+          .eq('student_id', id);
+      } catch (e) {
+        console.warn('Seat cleanup skipped:', e);
       }
 
-      await supabase
-        .from('seat_assignments')
-        .delete()
-        .eq('student_id', id);
+      try {
+        await supabase
+          .from('messages')
+          .delete()
+          .or(`sender_id.eq.${id},receiver_id.eq.${id}`);
+      } catch (e) {
+        console.warn('Messages cleanup skipped:', e);
+      }
 
-      await supabase
-        .from('conversations')
-        .delete()
-        .eq('student_id', id);
+      try {
+        await supabase
+          .from('conversations')
+          .delete()
+          .eq('student_id', id);
+      } catch (e) {
+        console.warn('Conversations cleanup skipped:', e);
+      }
 
-      await supabase
-        .from('messages')
-        .delete()
-        .or(`sender_id.eq.${id},receiver_id.eq.${id}`);
+      try {
+        await supabase
+          .from('subscriptions')
+          .delete()
+          .eq('student_id', id);
+      } catch (e) {
+        console.warn('Subscriptions cleanup skipped:', e);
+      }
 
-      // B. Delete profile from Supabase
+      // Delete profile from Supabase
       const { error: delErr } = await supabase
         .from('profiles')
         .delete()
