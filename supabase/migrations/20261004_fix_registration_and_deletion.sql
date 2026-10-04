@@ -1,5 +1,5 @@
 -- ============================================================================
--- FIX STUDENT REGISTRATION & DELETION PIPELINE (V2)
+-- FIX STUDENT REGISTRATION, DELETION & ORPHANED AUTH PURGE (V3)
 -- Run this in the Supabase Dashboard SQL Editor
 -- ============================================================================
 
@@ -76,14 +76,19 @@ CREATE TABLE IF NOT EXISTS public.subscriptions (
 
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Students can view own subscription" ON public.subscriptions;
+DO $$
+BEGIN
+    DROP POLICY IF EXISTS "Students can view own subscription" ON public.subscriptions;
+    DROP POLICY IF EXISTS "Admins can manage all subscriptions" ON public.subscriptions;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 CREATE POLICY "Students can view own subscription" ON public.subscriptions
     FOR SELECT USING (
         student_id IN (SELECT id FROM public.profiles WHERE auth_user_id = auth.uid()) OR
         public.is_admin()
     );
 
-DROP POLICY IF EXISTS "Admins can manage all subscriptions" ON public.subscriptions;
 CREATE POLICY "Admins can manage all subscriptions" ON public.subscriptions
     FOR ALL USING (public.is_admin());
 
@@ -100,30 +105,47 @@ CREATE TABLE IF NOT EXISTS public.notifications (
 
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+DO $$
+BEGIN
+    DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+    DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 CREATE POLICY "Users can view own notifications" ON public.notifications
     FOR SELECT USING (
         user_id IN (SELECT id FROM public.profiles WHERE auth_user_id = auth.uid()) OR
         public.is_admin()
     );
 
-DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
 CREATE POLICY "Users can update own notifications" ON public.notifications
     FOR UPDATE USING (
         user_id IN (SELECT id FROM public.profiles WHERE auth_user_id = auth.uid()) OR
         public.is_admin()
     );
 
--- 4. ENSURE RLS POLICIES ON profiles ALLOW PROPER INSERT & DELETE
+-- 4. CLEANLY RE-CREATE RLS POLICIES ON profiles (NO DUPLICATE ERRORS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Admins can delete profiles" ON public.profiles;
-DROP POLICY IF EXISTS "Admins can DELETE profiles" ON public.profiles;
-DROP POLICY IF EXISTS "Admins can delete any profile" ON public.profiles;
-DROP POLICY IF EXISTS "Enable insert for user registration" ON public.profiles;
-DROP POLICY IF EXISTS "Enable insert for authenticated users or service" ON public.profiles;
-DROP POLICY IF EXISTS "Users can INSERT their own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN 
+        SELECT policyname 
+        FROM pg_policies 
+        WHERE tablename = 'profiles' AND schemaname = 'public'
+          AND LOWER(policyname) IN (
+            'admins can delete profiles',
+            'admins can delete any profile',
+            'enable insert for user registration',
+            'enable insert for authenticated users or service',
+            'users can insert their own profile'
+          )
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.profiles', pol.policyname);
+    END LOOP;
+END $$;
 
 CREATE POLICY "Enable insert for user registration" ON public.profiles
     FOR INSERT WITH CHECK (
@@ -134,22 +156,21 @@ CREATE POLICY "Admins can delete profiles" ON public.profiles
     FOR DELETE USING (public.is_admin());
 
 -- 5. SECURE TRANSACTIONAL FUNCTION TO DELETE STUDENT ACCOUNTS
--- Defensively handles all related tables via dynamic SQL so missing tables never cause errors
+-- Wipes seat assignments, messages, profile, AND auth.users record completely
 CREATE OR REPLACE FUNCTION public.delete_student_account(p_student_id UUID)
 RETURNS JSON AS $$
 DECLARE
     v_is_admin BOOLEAN;
     v_auth_user_id UUID;
     v_student_name TEXT;
+    v_student_email TEXT;
 BEGIN
-    -- Verify caller is admin
     SELECT public.is_admin() INTO v_is_admin;
     IF NOT v_is_admin THEN
         RETURN json_build_object('success', false, 'error', 'Unauthorized: Caller is not an admin');
     END IF;
 
-    -- Get student info
-    SELECT auth_user_id, full_name INTO v_auth_user_id, v_student_name 
+    SELECT auth_user_id, full_name, email INTO v_auth_user_id, v_student_name, v_student_email 
     FROM public.profiles 
     WHERE id = p_student_id;
 
@@ -167,8 +188,7 @@ BEGIN
                 SELECT seat_id FROM public.seat_assignments 
                 WHERE student_id = p_student_id AND status = 'active'::public.assignment_status
             );
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
@@ -176,8 +196,7 @@ BEGIN
     IF to_regclass('public.seat_assignments') IS NOT NULL THEN
         BEGIN
             EXECUTE 'DELETE FROM public.seat_assignments WHERE student_id = $1' USING p_student_id;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
@@ -188,16 +207,14 @@ BEGIN
             IF to_regclass('public.conversations') IS NOT NULL THEN
                 EXECUTE 'DELETE FROM public.messages WHERE conversation_id IN (SELECT id FROM public.conversations WHERE student_id = $1)' USING p_student_id;
             END IF;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
     IF to_regclass('public.conversations') IS NOT NULL THEN
         BEGIN
             EXECUTE 'DELETE FROM public.conversations WHERE student_id = $1' USING p_student_id;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
@@ -205,8 +222,7 @@ BEGIN
     IF to_regclass('public.subscriptions') IS NOT NULL THEN
         BEGIN
             EXECUTE 'DELETE FROM public.subscriptions WHERE student_id = $1' USING p_student_id;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
@@ -214,8 +230,7 @@ BEGIN
     IF to_regclass('public.notifications') IS NOT NULL THEN
         BEGIN
             EXECUTE 'DELETE FROM public.notifications WHERE user_id = $1' USING p_student_id;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
@@ -223,20 +238,25 @@ BEGIN
     IF to_regclass('public.audit_logs') IS NOT NULL THEN
         BEGIN
             EXECUTE 'DELETE FROM public.audit_logs WHERE entity_id = $1' USING p_student_id;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
     -- 7. Delete profile
     DELETE FROM public.profiles WHERE id = p_student_id;
 
-    -- 8. Delete auth user from auth.users if linked
+    -- 8. Delete auth user from auth.users (both by ID and by email)
     IF v_auth_user_id IS NOT NULL THEN
         BEGIN
             DELETE FROM auth.users WHERE id = v_auth_user_id;
-        EXCEPTION WHEN OTHERS THEN
-            NULL;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+    END IF;
+
+    IF v_student_email IS NOT NULL AND LOWER(v_student_email) != 'admin@library.com' THEN
+        BEGIN
+            DELETE FROM auth.users WHERE LOWER(email) = LOWER(v_student_email);
+        EXCEPTION WHEN OTHERS THEN NULL;
         END;
     END IF;
 
@@ -245,3 +265,52 @@ EXCEPTION WHEN OTHERS THEN
     RETURN json_build_object('success', false, 'error', SQLERRM);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 6. PURGE ORPHANED AUTH USERS FUNCTION
+-- Allows registration to clean up abandoned auth.users if no profile exists
+CREATE OR REPLACE FUNCTION public.purge_orphaned_auth_user(p_email TEXT)
+RETURNS JSON AS $$
+DECLARE
+    v_profile_exists BOOLEAN;
+    v_purged_count INT := 0;
+BEGIN
+    IF p_email IS NULL OR TRIM(p_email) = '' THEN
+        RETURN json_build_object('success', false, 'error', 'Email is required');
+    END IF;
+
+    IF LOWER(TRIM(p_email)) = 'admin@library.com' THEN
+        RETURN json_build_object('success', false, 'error', 'Cannot purge admin user');
+    END IF;
+
+    -- Check if an active profile exists
+    SELECT EXISTS (
+        SELECT 1 FROM public.profiles WHERE LOWER(email) = LOWER(TRIM(p_email))
+    ) INTO v_profile_exists;
+
+    IF v_profile_exists THEN
+        RETURN json_build_object('success', false, 'reason', 'profile_exists');
+    END IF;
+
+    -- Delete any leftover auth user with this email
+    WITH deleted AS (
+        DELETE FROM auth.users 
+        WHERE LOWER(email) = LOWER(TRIM(p_email))
+          AND LOWER(email) != 'admin@library.com'
+        RETURNING id
+    )
+    SELECT count(*) INTO v_purged_count FROM deleted;
+
+    RETURN json_build_object('success', true, 'purged_count', v_purged_count);
+EXCEPTION WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', SQLERRM);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 7. CLEAN UP ALL EXISTING ORPHANED AUTH USERS IMMEDIATELY
+-- Deletes any auth.users entry that has no active record in public.profiles
+DELETE FROM auth.users u
+WHERE NOT EXISTS (
+    SELECT 1 FROM public.profiles p WHERE p.auth_user_id = u.id OR LOWER(p.email) = LOWER(u.email)
+)
+AND LOWER(u.email) != 'admin@library.com'
+AND COALESCE(u.raw_user_meta_data->>'role', '') != 'admin';

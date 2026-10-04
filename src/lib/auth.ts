@@ -13,12 +13,13 @@ export async function signIn(emailOrId: string, password: string) {
       const { data: foundProfile } = await supabase
         .from('profiles')
         .select('email')
-        .eq('student_id', term)
+        .ilike('student_id', term)
         .maybeSingle();
       
-      if (foundProfile?.email) {
-        emailToTry = foundProfile.email;
+      if (!foundProfile?.email) {
+        throw new Error(`Student ID "${term}" not found. If this account was deleted, please register as a new student.`);
       }
+      emailToTry = foundProfile.email;
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -27,10 +28,35 @@ export async function signIn(emailOrId: string, password: string) {
     });
 
     if (error) {
+      // If error logging in with email, check if profile was deleted by admin
+      if (emailToTry.includes('@')) {
+        const { data: profileCheck } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('email', emailToTry)
+          .maybeSingle();
+
+        if (!profileCheck) {
+          // Profile was deleted, clean up orphaned auth user so student can re-register
+          try {
+            await supabase.rpc('purge_orphaned_auth_user', { p_email: emailToTry });
+          } catch (_) {}
+          throw new Error('This student account was deleted by an admin. You can now register a new account on the Register page.');
+        }
+      }
       throw new Error(error.message || 'Invalid email or password.');
     }
 
     if (data?.user) {
+      const userProfile = await getProfile(data.user.id);
+      if (!userProfile && emailToTry.toLowerCase() !== 'admin@library.com') {
+        // Authenticated in auth.users, but no profile exists in profiles table
+        await supabase.auth.signOut();
+        try {
+          await supabase.rpc('purge_orphaned_auth_user', { p_email: emailToTry });
+        } catch (_) {}
+        throw new Error('This student profile was deleted by an admin. You can now register a new account.');
+      }
       return data;
     }
     throw new Error('Login failed. Please check your credentials.');
@@ -62,25 +88,58 @@ export async function signUp(formData: RegisterFormData) {
   try {
     const studentId = formData.student_id?.trim() || `STU${Math.floor(100000 + Math.random() * 900000)}`;
 
+    const signUpOptions = {
+      data: {
+        full_name: formData.full_name,
+        phone: formData.phone || formData.mobile_number || '',
+        student_id: studentId,
+        date_of_birth: formData.date_of_birth || null,
+        address: formData.address || null,
+        emergency_contact: formData.emergency_contact || null,
+        role: 'student',
+      }
+    };
+
     // 1. Create auth user with metadata for database trigger
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    let { data: authData, error: authError } = await supabase.auth.signUp({
       email: formData.email,
       password: formData.password,
-      options: {
-        data: {
-          full_name: formData.full_name,
-          phone: formData.phone || formData.mobile_number || '',
-          student_id: studentId,
-          date_of_birth: formData.date_of_birth || null,
-          address: formData.address || null,
-          emergency_contact: formData.emergency_contact || null,
-          role: 'student',
-        }
-      }
+      options: signUpOptions
     });
 
-    if (authError) throw authError;
-    if (!authData.user) throw new Error('Registration failed');
+    // If email already exists, check if it's an orphaned auth user from a deleted account
+    if (authError) {
+      const errMsg = authError.message?.toLowerCase() || '';
+      const originalMsg = authError.message;
+      if (errMsg.includes('already registered') || errMsg.includes('already exist')) {
+        try {
+          const { data: purgeRes } = await supabase.rpc('purge_orphaned_auth_user', {
+            p_email: formData.email.trim()
+          });
+
+          if (purgeRes?.success && purgeRes?.purged_count > 0) {
+            // Successfully purged orphaned record! Retry registration:
+            const retry = await supabase.auth.signUp({
+              email: formData.email,
+              password: formData.password,
+              options: signUpOptions
+            });
+
+            if (retry.error) throw retry.error;
+            authData = retry.data;
+            authError = null;
+          } else {
+            throw new Error('An active account with this email already exists. Please log in.');
+          }
+        } catch (purgeErr: any) {
+          throw new Error(purgeErr.message || originalMsg);
+        }
+      } else {
+        throw authError;
+      }
+    }
+
+    if (!authData?.user) throw new Error('Registration failed');
     
     // 2. Ensure profile exists and has all form fields
     try {
