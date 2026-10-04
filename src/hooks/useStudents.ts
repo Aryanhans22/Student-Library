@@ -275,29 +275,64 @@ export function useStudents() {
       }
     }
     try {
-      // 1. Release any seat assignment in Supabase
-      await supabase
-        .from('seat_assignments')
-        .update({ status: 'released', released_at: new Date().toISOString() })
-        .eq('student_id', id);
+      // 1. Try atomic transactional RPC first
+      const { data, error: rpcErr } = await supabase.rpc('delete_student_account', {
+        p_student_id: id
+      });
 
-      // 2. Delete profile from Supabase
-      const { error } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      await mockStore.deleteStudent(id);
-      setStudents((prev) => prev.filter((s) => s.id !== id));
-      setTotalCount((prev) => Math.max(0, prev - 1));
-    } catch (err: any) {
-      if (err?.message?.includes('Failed to fetch')) {
-        await mockStore.deleteStudent(id);
+      if (!rpcErr && data?.success) {
         setStudents((prev) => prev.filter((s) => s.id !== id));
         setTotalCount((prev) => Math.max(0, prev - 1));
         return;
       }
+
+      if (data && !data.success && !rpcErr) {
+        throw new Error(data.error || 'Failed to delete student');
+      }
+
+      // 2. Fallback: manual sequential deletion if RPC is not yet created
+      // A. Release active seat
+      const { data: activeAssignment } = await supabase
+        .from('seat_assignments')
+        .select('seat_id')
+        .eq('student_id', id)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (activeAssignment?.seat_id) {
+        await supabase
+          .from('seats')
+          .update({ status: 'available' })
+          .eq('id', activeAssignment.seat_id);
+      }
+
+      await supabase
+        .from('seat_assignments')
+        .delete()
+        .eq('student_id', id);
+
+      await supabase
+        .from('conversations')
+        .delete()
+        .eq('student_id', id);
+
+      await supabase
+        .from('messages')
+        .delete()
+        .or(`sender_id.eq.${id},receiver_id.eq.${id}`);
+
+      // B. Delete profile from Supabase
+      const { error: delErr } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', id);
+
+      if (delErr) throw delErr;
+
+      setStudents((prev) => prev.filter((s) => s.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+    } catch (err: any) {
+      console.error('deleteStudent error:', err);
       setError(err.message || 'Failed to delete student');
       throw err;
     } finally {

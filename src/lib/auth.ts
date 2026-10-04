@@ -60,41 +60,48 @@ export async function signUp(formData: RegisterFormData) {
   }
 
   try {
-    // 1. Create auth user
+    const studentId = formData.student_id?.trim() || `STU${Math.floor(100000 + Math.random() * 900000)}`;
+
+    // 1. Create auth user with metadata for database trigger
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: formData.email,
       password: formData.password,
+      options: {
+        data: {
+          full_name: formData.full_name,
+          phone: formData.phone || formData.mobile_number || '',
+          student_id: studentId,
+          date_of_birth: formData.date_of_birth || null,
+          address: formData.address || null,
+          emergency_contact: formData.emergency_contact || null,
+          role: 'student',
+        }
+      }
     });
+
     if (authError) throw authError;
     if (!authData.user) throw new Error('Registration failed');
     
-    // 2. Create profile
-    const studentId = formData.student_id?.trim() || `STU${Math.floor(100000 + Math.random() * 900000)}`;
-    const { error: profileError } = await supabase.from('profiles').insert({
-      auth_user_id: authData.user.id,
-      role: 'student',
-      full_name: formData.full_name,
-      email: formData.email,
-      phone: formData.phone || formData.mobile_number || null,
-      student_id: studentId,
-      date_of_birth: formData.date_of_birth || null,
-      address: formData.address || null,
-      emergency_contact: formData.emergency_contact || null,
-      status: 'active',
-    });
-    if (profileError) throw profileError;
+    // 2. Ensure profile exists and has all form fields
+    try {
+      await supabase.from('profiles').upsert({
+        auth_user_id: authData.user.id,
+        role: 'student',
+        full_name: formData.full_name,
+        email: formData.email,
+        phone: formData.phone || formData.mobile_number || null,
+        student_id: studentId,
+        date_of_birth: formData.date_of_birth || null,
+        address: formData.address || null,
+        emergency_contact: formData.emergency_contact || null,
+        status: 'active',
+      }, { onConflict: 'email' });
+    } catch (profileErr) {
+      console.warn('Profile sync handled by trigger or notice:', profileErr);
+    }
     
     return authData;
   } catch (err: any) {
-    if (err?.message?.includes('Failed to fetch') || !navigator.onLine) {
-      console.warn('Network error reaching Supabase, registering in local demo store.');
-      const mockProfile = await mockStore.signUp(formData);
-      return {
-        user: { id: mockProfile.auth_user_id, email: mockProfile.email } as any,
-        session: { user: { id: mockProfile.auth_user_id, email: mockProfile.email } } as any,
-        mockProfile,
-      };
-    }
     throw err;
   }
 }
