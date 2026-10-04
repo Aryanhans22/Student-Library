@@ -135,6 +135,20 @@ export function useChat() {
 
           if (!error && data) {
             setMessages(data);
+
+            // If there are unread messages from the other user, mark them as read immediately
+            const hasUnread = data.some((m: any) => m.sender_id !== currentUserId && (!m.read_at || !m.is_read));
+            if (hasUnread) {
+              try {
+                await supabase.rpc('mark_messages_read', { p_conversation_id: convId });
+              } catch (_) {
+                await supabase
+                  .from('messages')
+                  .update({ read_at: new Date().toISOString(), is_read: true })
+                  .eq('conversation_id', convId)
+                  .neq('sender_id', currentUserId);
+              }
+            }
           }
         } else {
           // No conversation yet, just set empty messages
@@ -226,18 +240,44 @@ export function useChat() {
         { ...c, unread_by_admin: 0, unread_by_student: 0 } : c))
     );
 
-    if (isSupabaseConfigured && activeConversationId && !activeConversationId.startsWith('mock_') && !activeConversationId.startsWith('new_')) {
+    if (isSupabaseConfigured) {
       try {
-         await supabase
-          .from('messages')
-          .update({ read_at: new Date().toISOString() })
-          .eq('conversation_id', activeConversationId)
-          .neq('sender_id', currentUserId)
-          .is('read_at', null);
+        let convIdToUse = activeConversationId;
+        if (!convIdToUse || convIdToUse.startsWith('mock_') || convIdToUse.startsWith('new_')) {
+          const { data: convs } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(`student_id.eq.${currentUserId},student_id.eq.${otherUserId}`)
+            .limit(1);
+          if (convs && convs.length > 0) {
+            convIdToUse = convs[0].id;
+          }
+        }
+
+        if (convIdToUse && !convIdToUse.startsWith('mock_') && !convIdToUse.startsWith('new_')) {
+          const { error: rpcErr } = await supabase.rpc('mark_messages_read', {
+            p_conversation_id: convIdToUse
+          });
+
+          if (rpcErr) {
+            await supabase
+              .from('messages')
+              .update({ read_at: new Date().toISOString(), is_read: true })
+              .eq('conversation_id', convIdToUse)
+              .neq('sender_id', currentUserId);
+          }
+
+          // Optimistically mark messages as read locally
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.sender_id !== currentUserId ? { ...m, is_read: true, read_at: m.read_at || new Date().toISOString() } : m
+            )
+          );
+        }
       } catch (e) {
-         console.error('[HELPDESK] markAsRead error:', e);
+        console.error('[HELPDESK] markAsRead error:', e);
       }
-    } else if (!isSupabaseConfigured) {
+    } else {
       await mockStore.markMessagesRead(otherUserId, currentUserId);
     }
   }, [activeConversationId]);
@@ -266,6 +306,13 @@ export function useChat() {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
           });
+
+          // Mark incoming message as read since user is actively viewing this conversation
+          (async () => {
+            try {
+              await supabase.rpc('mark_messages_read', { p_conversation_id: activeConversationId });
+            } catch (_) {}
+          })();
         }
       )
       .on(

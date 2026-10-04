@@ -36,6 +36,16 @@ export default function StudentChat() {
     }
   }, [profile?.id, fetchMessages, markAsRead]);
 
+  // When messages arrive or update, mark any unread messages from admin as read
+  useEffect(() => {
+    if (profile?.id && messages.length > 0) {
+      const hasUnread = messages.some((m) => m.sender_id !== profile.id && (!m.read_at || !m.is_read));
+      if (hasUnread) {
+        markAsRead(ADMIN_ID, profile.id);
+      }
+    }
+  }, [messages, profile?.id, markAsRead]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -173,13 +183,13 @@ export default function StudentChat() {
                         })}
                       </span>
                       {isMe && (
-                        msg.read_at ? (
-                          <span title="Read by Admin">
-                            <CheckCheck className="h-3 w-3 text-indigo-200" />
+                        (msg.read_at || msg.is_read) ? (
+                          <span title="Read by Admin" className="inline-flex items-center">
+                            <CheckCheck className="h-3.5 w-3.5 text-sky-300" />
                           </span>
                         ) : (
-                          <span title="Delivered">
-                            <Check className="h-3 w-3 text-indigo-300" />
+                          <span title="Sent" className="inline-flex items-center">
+                            <Check className="h-3.5 w-3.5 text-indigo-200/80" />
                           </span>
                         )
                       )}

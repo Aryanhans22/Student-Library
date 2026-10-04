@@ -888,6 +888,7 @@ class MockDataStore {
       if ((m.sender_id === senderId && matchReceiver) || (matchSender && m.receiver_id === receiverId)) {
         if (!m.read_at) {
           m.read_at = new Date().toISOString();
+          m.is_read = true;
           changed = true;
         }
       }

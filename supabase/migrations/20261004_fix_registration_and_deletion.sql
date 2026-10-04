@@ -598,3 +598,48 @@ WHERE NOT EXISTS (
 )
 AND LOWER(u.email) != 'admin@library.com'
 AND COALESCE(u.raw_user_meta_data->>'role', '') != 'admin';
+
+-- 10. REAL-TIME READ RECEIPTS (SINGLE TICK TO DOUBLE TICK)
+CREATE OR REPLACE FUNCTION public.mark_messages_read(p_conversation_id UUID)
+RETURNS JSON AS $$
+DECLARE
+    v_user_id UUID;
+    v_role public.user_role;
+    v_updated_count INT;
+BEGIN
+    SELECT id, role INTO v_user_id, v_role 
+    FROM public.profiles 
+    WHERE auth_user_id = auth.uid();
+
+    IF v_user_id IS NULL THEN
+        RETURN json_build_object('success', false, 'error', 'Not authenticated');
+    END IF;
+
+    -- Update messages where caller is NOT the sender
+    UPDATE public.messages
+    SET is_read = true,
+        read_at = now()
+    WHERE conversation_id = p_conversation_id
+      AND sender_id != v_user_id
+      AND (is_read = false OR read_at IS NULL);
+
+    GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+
+    -- Reset unread counts on conversation
+    IF v_role = 'student' THEN
+        UPDATE public.conversations
+        SET unread_by_student = 0,
+            updated_at = now()
+        WHERE id = p_conversation_id;
+    ELSE
+        UPDATE public.conversations
+        SET unread_by_admin = 0,
+            updated_at = now()
+        WHERE id = p_conversation_id;
+    END IF;
+
+    RETURN json_build_object('success', true, 'updated_count', v_updated_count);
+EXCEPTION WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', SQLERRM);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

@@ -76,13 +76,22 @@ export default function AdminMessages() {
     }
   }, [conversations, searchParams, setSearchParams, selectedStudentId]);
 
-  // When selected student changes, fetch messages & mark read
   useEffect(() => {
     if (selectedStudentId) {
       fetchMessages(selectedStudentId, effectiveAdminId);
       markAsRead(selectedStudentId, effectiveAdminId);
     }
   }, [selectedStudentId, effectiveAdminId, fetchMessages, markAsRead]);
+
+  // When messages arrive or update, mark unread messages from student as read
+  useEffect(() => {
+    if (selectedStudentId && effectiveAdminId && messages.length > 0) {
+      const hasUnread = messages.some((m) => m.sender_id === selectedStudentId && (!m.read_at || !m.is_read));
+      if (hasUnread) {
+        markAsRead(selectedStudentId, effectiveAdminId);
+      }
+    }
+  }, [messages, selectedStudentId, effectiveAdminId, markAsRead]);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -392,13 +401,13 @@ export default function AdminMessages() {
                               })}
                             </span>
                             {isMe && (
-                              msg.read_at ? (
-                                <span title="Read by student">
-                                  <CheckCheck className="h-3 w-3 text-indigo-200" />
+                              (msg.read_at || msg.is_read) ? (
+                                <span title="Read by student" className="inline-flex items-center">
+                                  <CheckCheck className="h-3.5 w-3.5 text-sky-300" />
                                 </span>
                               ) : (
-                                <span title="Sent">
-                                  <Check className="h-3 w-3 text-indigo-300" />
+                                <span title="Sent" className="inline-flex items-center">
+                                  <Check className="h-3.5 w-3.5 text-indigo-200/80" />
                                 </span>
                               )
                             )}
