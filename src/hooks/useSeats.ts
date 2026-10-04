@@ -56,9 +56,26 @@ export function useSeats() {
     }
   }, []);
 
-  // Automatically fetch seats on mount
+  // Automatically fetch seats on mount and subscribe to realtime changes
   useEffect(() => {
     fetchSeats();
+
+    if (!isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel('realtime_seats')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'seats' },
+        () => {
+          fetchSeats();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchSeats]);
 
   const createSeat = useCallback(async (data: SeatFormData) => {

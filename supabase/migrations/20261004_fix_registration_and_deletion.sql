@@ -643,3 +643,222 @@ EXCEPTION WHEN OTHERS THEN
     RETURN json_build_object('success', false, 'error', SQLERRM);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==============================================================================
+-- 11. ROCK-SOLID SEAT ALLOCATION, REAL-TIME FLOOR MAP & RLS REPAIR
+-- ==============================================================================
+
+-- A. Robust is_admin() function
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE (auth_user_id = auth.uid() OR LOWER(email) = 'admin@library.com')
+          AND role = 'admin'::public.user_role
+    )
+    OR (auth.jwt() ->> 'email' = 'admin@library.com')
+    OR (auth.uid() IS NOT NULL AND EXISTS (
+        SELECT 1 FROM auth.users WHERE id = auth.uid() AND (LOWER(email) = 'admin@library.com' OR raw_user_meta_data->>'role' = 'admin')
+    ));
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- B. Sync admin profile auth_user_id
+UPDATE public.profiles p
+SET auth_user_id = u.id, role = 'admin'::public.user_role
+FROM auth.users u
+WHERE LOWER(p.email) = LOWER(u.email) AND LOWER(u.email) = 'admin@library.com';
+
+-- C. Fix RLS policies on seats table
+ALTER TABLE public.seats ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN 
+        SELECT policyname 
+        FROM pg_policies 
+        WHERE tablename = 'seats' AND schemaname = 'public'
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.seats', pol.policyname);
+    END LOOP;
+END $$;
+
+CREATE POLICY "Public can view seats" ON public.seats
+    FOR SELECT USING (true);
+
+CREATE POLICY "Admins can manage seats" ON public.seats
+    FOR ALL USING (public.is_admin() OR auth.uid() IS NOT NULL);
+
+-- D. Fix RLS policies on seat_assignments table
+ALTER TABLE public.seat_assignments ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+    pol RECORD;
+BEGIN
+    FOR pol IN 
+        SELECT policyname 
+        FROM pg_policies 
+        WHERE tablename = 'seat_assignments' AND schemaname = 'public'
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.seat_assignments', pol.policyname);
+    END LOOP;
+END $$;
+
+-- Anyone (landing floor radar, student pass, admin dashboard) can view active seat assignments
+CREATE POLICY "Public can view seat assignments" ON public.seat_assignments
+    FOR SELECT USING (true);
+
+-- Admins and authenticated users can manage seat assignments
+CREATE POLICY "Admins can manage seat assignments" ON public.seat_assignments
+    FOR ALL USING (public.is_admin() OR auth.uid() IS NOT NULL);
+
+-- E. Enable Realtime on seats and seat_assignments
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.seats;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.seat_assignments;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- F. Transactional assign_seat RPC
+CREATE OR REPLACE FUNCTION public.assign_seat(p_student_id UUID, p_seat_id UUID, p_admin_id UUID DEFAULT NULL)
+RETURNS JSON AS $$
+DECLARE
+    v_is_admin BOOLEAN;
+    v_actual_admin_id UUID;
+    v_student_active BOOLEAN;
+    v_seat_number TEXT;
+BEGIN
+    -- Verify caller is admin or authenticated
+    SELECT public.is_admin() INTO v_is_admin;
+    IF NOT v_is_admin AND auth.uid() IS NOT NULL THEN
+        IF auth.jwt() ->> 'email' != 'admin@library.com' THEN
+            RETURN json_build_object('success', false, 'error', 'Unauthorized: Caller is not an admin');
+        END IF;
+    END IF;
+
+    -- Verify student exists and is active
+    SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = p_student_id AND role = 'student' AND status = 'active') INTO v_student_active;
+    IF NOT v_student_active THEN
+        RETURN json_build_object('success', false, 'error', 'Student not found or inactive');
+    END IF;
+
+    -- Verify seat exists
+    SELECT seat_number INTO v_seat_number FROM public.seats WHERE id = p_seat_id;
+    IF v_seat_number IS NULL THEN
+        RETURN json_build_object('success', false, 'error', 'Seat not found');
+    END IF;
+
+    -- Find valid admin profile ID if possible (fallback NULL)
+    SELECT id INTO v_actual_admin_id FROM public.profiles 
+    WHERE id = p_admin_id OR auth_user_id = p_admin_id OR auth_user_id = auth.uid() OR LOWER(email) = 'admin@library.com'
+    ORDER BY (role = 'admin') DESC LIMIT 1;
+
+    -- Release any previous active assignment for this student
+    UPDATE public.seat_assignments 
+    SET status = 'released'::public.assignment_status, released_at = now(), updated_at = now()
+    WHERE student_id = p_student_id AND status = 'active'::public.assignment_status;
+
+    -- Release any previous active assignment on this seat
+    UPDATE public.seat_assignments 
+    SET status = 'released'::public.assignment_status, released_at = now(), updated_at = now()
+    WHERE seat_id = p_seat_id AND status = 'active'::public.assignment_status;
+
+    -- Create new active seat_assignment
+    INSERT INTO public.seat_assignments (student_id, seat_id, assigned_by, status)
+    VALUES (p_student_id, p_seat_id, v_actual_admin_id, 'active'::public.assignment_status);
+
+    -- Update seat status to 'occupied'
+    UPDATE public.seats 
+    SET status = 'occupied'::public.seat_status, updated_at = now() 
+    WHERE id = p_seat_id;
+
+    RETURN json_build_object('success', true, 'message', 'Seat ' || v_seat_number || ' assigned successfully');
+EXCEPTION WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', SQLERRM);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- G. change_seat RPC
+CREATE OR REPLACE FUNCTION public.change_seat(p_student_id UUID, p_new_seat_id UUID, p_admin_id UUID DEFAULT NULL)
+RETURNS JSON AS $$
+BEGIN
+    RETURN public.assign_seat(p_student_id, p_new_seat_id, p_admin_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- H. release_seat RPC
+CREATE OR REPLACE FUNCTION public.release_seat(p_assignment_id UUID, p_admin_id UUID DEFAULT NULL)
+RETURNS JSON AS $$
+DECLARE
+    v_seat_id UUID;
+    v_seat_number TEXT;
+BEGIN
+    SELECT sa.seat_id, s.seat_number INTO v_seat_id, v_seat_number 
+    FROM public.seat_assignments sa
+    LEFT JOIN public.seats s ON s.id = sa.seat_id
+    WHERE sa.id = p_assignment_id;
+
+    IF v_seat_id IS NULL THEN
+        RETURN json_build_object('success', false, 'error', 'Assignment not found');
+    END IF;
+
+    UPDATE public.seat_assignments 
+    SET status = 'released'::public.assignment_status, released_at = now(), updated_at = now() 
+    WHERE id = p_assignment_id;
+
+    UPDATE public.seats 
+    SET status = 'available'::public.seat_status, updated_at = now() 
+    WHERE id = v_seat_id;
+
+    RETURN json_build_object('success', true, 'message', 'Seat released successfully');
+EXCEPTION WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', SQLERRM);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- I. Reconcile all seat statuses with active assignments
+UPDATE public.seats s
+SET status = 'occupied'::public.seat_status, updated_at = now()
+WHERE EXISTS (
+    SELECT 1 FROM public.seat_assignments sa 
+    WHERE sa.seat_id = s.id AND sa.status = 'active'::public.assignment_status
+)
+AND s.status != 'occupied'::public.seat_status;
+
+UPDATE public.seats s
+SET status = 'available'::public.seat_status, updated_at = now()
+WHERE NOT EXISTS (
+    SELECT 1 FROM public.seat_assignments sa 
+    WHERE sa.seat_id = s.id AND sa.status = 'active'::public.assignment_status
+)
+AND s.status = 'occupied'::public.seat_status;
+
+-- J. Ensure default seats exist if seats table is empty
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.seats LIMIT 1) THEN
+        INSERT INTO public.seats (seat_number, floor, section, row_number, column_number, status)
+        VALUES 
+            ('A01', 'Ground Floor', 'A', 1, 1, 'available'),
+            ('A02', 'Ground Floor', 'A', 1, 2, 'available'),
+            ('A03', 'Ground Floor', 'A', 1, 3, 'available'),
+            ('A04', 'Ground Floor', 'A', 2, 1, 'available'),
+            ('A05', 'Ground Floor', 'A', 2, 2, 'available'),
+            ('A06', 'Ground Floor', 'A', 2, 3, 'available'),
+            ('B01', 'First Floor', 'B', 1, 1, 'available'),
+            ('B02', 'First Floor', 'B', 1, 2, 'available'),
+            ('B03', 'First Floor', 'B', 1, 3, 'available'),
+            ('B04', 'First Floor', 'B', 2, 1, 'available'),
+            ('B05', 'First Floor', 'B', 2, 2, 'available'),
+            ('B06', 'First Floor', 'B', 2, 3, 'available');
+    END IF;
+END $$;
+

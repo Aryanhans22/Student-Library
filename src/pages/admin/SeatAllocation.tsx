@@ -26,6 +26,7 @@ export default function SeatAllocation() {
 
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedSection, setSelectedSection] = useState('all');
+  const [seatStatusFilter, setSeatStatusFilter] = useState<'all' | 'available' | 'occupied'>('all');
   const [selectedStudent, setSelectedStudent] = useState<Profile | null>(null);
   const [selectedSeat, setSelectedSeat] = useState<Seat | null>(null);
   const [isReleasing, setIsReleasing] = useState(false);
@@ -53,14 +54,14 @@ export default function SeatAllocation() {
   // Show active students list, filter when search term is entered
   const filteredStudents = useMemo(() => {
     if (!activeStudents) return [];
-    if (!studentSearch.trim()) return activeStudents.slice(0, 20);
+    if (!studentSearch.trim()) return activeStudents.slice(0, 50);
     const query = studentSearch.toLowerCase().trim();
     return activeStudents.filter(s => 
       s.full_name?.toLowerCase().includes(query) ||
       s.student_id?.toLowerCase().includes(query) ||
       s.email?.toLowerCase().includes(query) ||
       (s.phone && s.phone.includes(query))
-    ).slice(0, 20);
+    ).slice(0, 50);
   }, [activeStudents, studentSearch]);
 
   const sections = useMemo(() => {
@@ -68,24 +69,54 @@ export default function SeatAllocation() {
     return Array.from(new Set(seats.map(s => s.section))).filter((s): s is string => Boolean(s)).sort();
   }, [seats]);
 
-  const availableSeats = useMemo(() => {
+  const allFilteredSeats = useMemo(() => {
     if (!seats) return [];
-    let list = seats.filter(s => s.status === 'available');
+    let list = [...seats];
     if (selectedSection !== 'all') {
       list = list.filter(s => s.section === selectedSection);
     }
+    if (seatStatusFilter === 'available') {
+      list = list.filter(s => s.status === 'available');
+    } else if (seatStatusFilter === 'occupied') {
+      list = list.filter(s => s.status === 'occupied');
+    }
     return list;
-  }, [seats, selectedSection]);
+  }, [seats, selectedSection, seatStatusFilter]);
+
+  const availableSeatsCount = useMemo(() => {
+    if (!seats) return 0;
+    return seats.filter(s => s.status === 'available').length;
+  }, [seats]);
+
+  const occupiedSeatsCount = useMemo(() => {
+    if (!seats) return 0;
+    return seats.filter(s => s.status === 'occupied').length;
+  }, [seats]);
+
+  const getSeatAssignee = (seatId: string, seatNumber: string) => {
+    if (!assignments) return null;
+    const asgn = assignments.find((a: any) => 
+      (a.seat_id === seatId || a.seat?.seat_number?.toUpperCase() === seatNumber.toUpperCase()) && a.status === 'active'
+    );
+    if (!asgn) return null;
+    return asgn.student || students?.find(s => s.id === asgn.student_id) || null;
+  };
   
   const studentCurrentAssignment = useMemo(() => {
     if (!selectedStudent || !assignments) return null;
-    return assignments.find((a: any) => a.student_id === selectedStudent.id && a.status === 'active');
+    return assignments.find((a: any) => a.student_id === selectedStudent.id && a.status === 'active') || null;
   }, [selectedStudent, assignments]);
 
   const studentCurrentSeat = useMemo(() => {
-    if (!studentCurrentAssignment || !seats) return null;
-    return seats.find(s => s.id === studentCurrentAssignment.seat_id);
-  }, [studentCurrentAssignment, seats]);
+    if (studentCurrentAssignment) {
+      return (studentCurrentAssignment as any).seat || seats?.find(s => s.id === studentCurrentAssignment.seat_id) || null;
+    }
+    const studentActiveSeatNum = (selectedStudent as any)?.active_seat_number;
+    if (studentActiveSeatNum && seats) {
+      return seats.find(s => s.seat_number?.toUpperCase() === studentActiveSeatNum.toUpperCase()) || null;
+    }
+    return null;
+  }, [studentCurrentAssignment, selectedStudent, seats]);
 
   // Actions
   const handleSelectStudent = (student: Profile) => {
@@ -118,10 +149,14 @@ export default function SeatAllocation() {
       }
 
       toast.success(`Seat ${selectedSeat.seat_number} allocated to ${selectedStudent.full_name} successfully!`);
+      const newSeatNumber = selectedSeat.seat_number;
       setSelectedSeat(null);
-      await fetchSeats();
-      await fetchAssignments();
-      await fetchStudents({ limit: 100 });
+      setSelectedStudent(prev => prev ? { ...prev, active_seat_number: newSeatNumber } as any : null);
+      await Promise.all([
+        fetchSeats(),
+        fetchAssignments(),
+        fetchStudents({ limit: 100 })
+      ]);
     } catch (error: any) {
       toast.error(error.message || 'Failed to assign seat');
     } finally {
@@ -130,19 +165,25 @@ export default function SeatAllocation() {
   };
 
   const handleReleaseSeat = async () => {
-    if (!studentCurrentAssignment) return;
+    if (!studentCurrentAssignment && !(selectedStudent as any)?.active_seat_number) return;
     setIsReleasing(true);
     try {
-      const res = await releaseSeat(studentCurrentAssignment.id);
-      if (res && res.success === false) {
-        toast.error(res.error || 'Failed to release seat');
-        return;
+      const assignmentId = studentCurrentAssignment?.id || assignments?.find((a: any) => a.student_id === selectedStudent?.id && a.status === 'active')?.id;
+      if (assignmentId) {
+        const res = await releaseSeat(assignmentId);
+        if (res && res.success === false) {
+          toast.error(res.error || 'Failed to release seat');
+          return;
+        }
       }
       toast.success('Seat released successfully');
       setReleaseConfirmOpen(false);
-      await fetchSeats();
-      await fetchAssignments();
-      await fetchStudents({ limit: 100 });
+      setSelectedStudent(prev => prev ? { ...prev, active_seat_number: null } as any : null);
+      await Promise.all([
+        fetchSeats(),
+        fetchAssignments(),
+        fetchStudents({ limit: 100 })
+      ]);
     } catch (error: any) {
       toast.error(error.message || 'Failed to release seat');
     } finally {
@@ -211,7 +252,8 @@ export default function SeatAllocation() {
                     <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden shadow-xs max-h-[380px] overflow-y-auto">
                       {filteredStudents.map(student => {
                         const assignment = assignments?.find((a: any) => a.student_id === student.id && a.status === 'active');
-                        const assignedSeat = assignment ? seats?.find(s => s.id === assignment.seat_id) : null;
+                        const assignedSeat = assignment ? ((assignment as any).seat || seats?.find(s => s.id === assignment.seat_id)) : null;
+                        const allocatedSeatNumber = assignedSeat?.seat_number || (student as any).active_seat_number;
                         const isSelected = studentIdParam === student.id;
 
                         return (
@@ -219,7 +261,7 @@ export default function SeatAllocation() {
                             key={student.id} 
                             className={cn(
                               "p-3 hover:bg-indigo-50/70 cursor-pointer flex items-center justify-between gap-3 transition-colors",
-                              isSelected ? "bg-indigo-50 font-medium" : ""
+                              isSelected ? "bg-indigo-50 font-medium border-l-4 border-indigo-600 pl-2.5" : ""
                             )}
                             onClick={() => handleSelectStudent(student)}
                           >
@@ -233,12 +275,13 @@ export default function SeatAllocation() {
                               </div>
                             </div>
                             
-                            {assignedSeat ? (
-                              <span className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                                Seat {assignedSeat.seat_number}
+                            {allocatedSeatNumber ? (
+                              <span className="shrink-0 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                                <Armchair className="w-3 h-3 text-emerald-600" />
+                                Seat {allocatedSeatNumber}
                               </span>
                             ) : (
-                              <span className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600">
+                              <span className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500">
                                 Unallocated
                               </span>
                             )}
@@ -334,20 +377,51 @@ export default function SeatAllocation() {
           </Card>
         </div>
 
-        {/* Step 2: Available Seat Selection (7 Columns) */}
+        {/* Step 2: Available & Allocated Seat Selection (7 Columns) */}
         <div className="lg:col-span-7 space-y-6">
           <Card className={cn("transition-all shadow-sm", selectedStudent && !selectedSeat ? "border-indigo-300 ring-2 ring-indigo-500/10" : "")}>
             <CardHeader className="pb-3 border-b flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-bold flex items-center gap-2 text-slate-900">
                 <span className={cn("w-6 h-6 rounded-full inline-flex items-center justify-center text-xs font-bold", selectedStudent ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-600")}>2</span>
-                <span>Select Available Seat</span>
+                <span>Select Desk & Floor Layout</span>
               </h2>
 
               {selectedStudent && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                    {availableSeats.length} Available Desks
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSeatStatusFilter('all')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md font-medium transition cursor-pointer",
+                        seatStatusFilter === 'all' ? "bg-white text-slate-900 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      All ({seats?.length || 0})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSeatStatusFilter('available')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1",
+                        seatStatusFilter === 'available' ? "bg-emerald-600 text-white shadow-xs font-bold" : "text-emerald-700 hover:bg-emerald-50"
+                      )}
+                    >
+                      <span>Available</span>
+                      <span className="font-mono">({availableSeatsCount})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSeatStatusFilter('occupied')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1",
+                        seatStatusFilter === 'occupied' ? "bg-indigo-600 text-white shadow-xs font-bold" : "text-indigo-700 hover:bg-indigo-50"
+                      )}
+                    >
+                      <span>Allocated</span>
+                      <span className="font-mono">({occupiedSeatsCount})</span>
+                    </button>
+                  </div>
 
                   {sections.length > 1 && (
                     <select
@@ -377,20 +451,86 @@ export default function SeatAllocation() {
                     <Skeleton key={i} className="h-16 w-full rounded-xl" />
                   ))}
                 </div>
-              ) : availableSeats.length === 0 ? (
+              ) : allFilteredSeats.length === 0 ? (
                 <EmptyState 
-                  title="No available seats" 
-                  description={selectedSection !== 'all' ? `No available seats in Section ${selectedSection}. Try selecting another section.` : "All seats in the library are currently occupied."} 
+                  title="No desks found" 
+                  description={
+                    seatStatusFilter === 'available'
+                      ? "All seats in this section are currently occupied."
+                      : seatStatusFilter === 'occupied'
+                      ? "No seats in this section are currently allocated."
+                      : "No seats found matching your criteria."
+                  } 
                   icon={<Armchair className="w-10 h-10 text-slate-400" />} 
                 />
               ) : (
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-500 font-medium">
-                    {studentCurrentSeat ? 'Click a seat below to REASSIGN to a new desk:' : 'Click a seat below to ALLOCATE:'}
-                  </p>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-72 overflow-y-auto p-1">
-                    {availableSeats.map(seat => {
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+                    <p>
+                      {studentCurrentSeat ? 'Click an available desk below to REASSIGN:' : 'Click an available desk below to ALLOCATE:'}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Available
+                      </span>
+                      <span className="flex items-center gap-1 text-[11px] text-indigo-700 font-semibold">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500"></span> Allocated
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-80 overflow-y-auto p-1">
+                    {allFilteredSeats.map(seat => {
                       const isSelected = selectedSeat?.id === seat.id;
+                      const isOccupied = seat.status === 'occupied';
+                      const isMaintenance = seat.status === 'maintenance' || seat.status === 'disabled';
+                      const assignee = getSeatAssignee(seat.id, seat.seat_number);
+                      const isCurrentStudentsDesk = (studentCurrentSeat?.id === seat.id || studentCurrentSeat?.seat_number === seat.seat_number);
+
+                      if (isOccupied) {
+                        return (
+                          <button
+                            key={seat.id}
+                            type="button"
+                            onClick={() => {
+                              if (isCurrentStudentsDesk) {
+                                toast(`Seat ${seat.seat_number} is already allocated to ${selectedStudent.full_name}`, { icon: 'ℹ️' });
+                              } else {
+                                toast(`Seat ${seat.seat_number} is occupied by ${assignee?.full_name || 'another student'}.`, { icon: '🔒' });
+                              }
+                            }}
+                            className={cn(
+                              "py-3 px-2 rounded-xl border font-bold text-sm transition-all flex flex-col items-center justify-center gap-1 cursor-pointer",
+                              isCurrentStudentsDesk
+                                ? "bg-indigo-50 border-indigo-400 ring-2 ring-indigo-500 text-indigo-950 shadow-xs"
+                                : "bg-slate-100/90 text-slate-700 border-slate-300 hover:bg-slate-200/80"
+                            )}
+                          >
+                            <Armchair className={cn("w-4 h-4", isCurrentStudentsDesk ? "text-indigo-600" : "text-slate-500")} />
+                            <span className="font-mono text-base">{seat.seat_number}</span>
+                            <span className={cn(
+                              "text-[10px] font-semibold px-1.5 py-0.2 rounded truncate max-w-[90%]",
+                              isCurrentStudentsDesk ? "bg-indigo-200 text-indigo-900" : "bg-slate-200 text-slate-700"
+                            )}>
+                              {isCurrentStudentsDesk ? 'Current' : assignee?.full_name ? assignee.full_name.split(' ')[0] : 'Occupied'}
+                            </span>
+                          </button>
+                        );
+                      }
+
+                      if (isMaintenance) {
+                        return (
+                          <div
+                            key={seat.id}
+                            className="py-3 px-2 rounded-xl border font-bold text-sm bg-amber-50 text-amber-800 border-amber-200 flex flex-col items-center justify-center gap-1 opacity-70"
+                          >
+                            <Armchair className="w-4 h-4 text-amber-600" />
+                            <span className="font-mono text-base">{seat.seat_number}</span>
+                            <span className="text-[10px] font-normal text-amber-700">Maint.</span>
+                          </div>
+                        );
+                      }
+
                       return (
                         <button
                           key={seat.id}

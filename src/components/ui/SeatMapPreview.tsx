@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSeats } from '../../hooks/useSeats';
+import { useSeatAssignments } from '../../hooks/useSeatAssignments';
 import {
   Armchair,
   Zap,
@@ -373,12 +375,109 @@ const FACILITY_AREAS: FacilityAreaMarker[] = [
 ];
 
 export function SeatMapPreview() {
+  const { seats, fetchSeats } = useSeats();
+  const { assignments, fetchAssignments } = useSeatAssignments();
+
   const [activeFloor, setActiveFloor] = useState<1 | 2>(1);
   const [filterType, setFilterType] = useState<'all' | 'available' | 'power' | 'window'>('all');
   const [selectedSeat, setSelectedSeat] = useState<FloorSeat | null>(null);
   const [highlightedArea, setHighlightedArea] = useState<string | null>(null);
 
-  const floorSeats = FLOOR_SEATS.filter((s) => s.floor === activeFloor);
+  // Auto-fetch seats and assignments
+  useEffect(() => {
+    fetchSeats();
+    fetchAssignments();
+  }, [fetchSeats, fetchAssignments]);
+
+  // Synchronize live database statuses with architectural template
+  const liveFloorSeats = useMemo(() => {
+    const list = FLOOR_SEATS.map((templateSeat) => {
+      // Find matching seat in database by seat_number
+      const dbSeat = seats?.find(
+        (s) => s.seat_number?.trim().toUpperCase() === templateSeat.number.trim().toUpperCase()
+      );
+
+      // Find active assignment for this seat if any
+      const activeAsgn = assignments?.find((a: any) => {
+        const matchesSeatId = dbSeat && a.seat_id === dbSeat.id;
+        const matchesSeatNumber = a.seat?.seat_number?.trim().toUpperCase() === templateSeat.number.trim().toUpperCase();
+        return (matchesSeatId || matchesSeatNumber) && a.status === 'active';
+      });
+
+      let liveStatus: 'available' | 'occupied' | 'reserved' = templateSeat.status;
+      let userInitials = templateSeat.userInitials;
+
+      if (activeAsgn) {
+        liveStatus = 'occupied';
+        const studentName = (activeAsgn as any).student?.full_name;
+        if (studentName) {
+          userInitials = studentName
+            .split(' ')
+            .map((n: string) => n[0])
+            .join('')
+            .substring(0, 2)
+            .toUpperCase();
+        }
+      } else if (dbSeat) {
+        if (dbSeat.status === 'occupied') {
+          liveStatus = 'occupied';
+          userInitials = userInitials || 'ST';
+        } else if (dbSeat.status === 'maintenance' || dbSeat.status === 'disabled') {
+          liveStatus = 'reserved';
+        } else {
+          liveStatus = 'available';
+          userInitials = undefined;
+        }
+      }
+
+      return {
+        ...templateSeat,
+        status: liveStatus,
+        userInitials: liveStatus === 'occupied' ? (userInitials || 'ST') : undefined,
+      };
+    });
+
+    // Check for any additional DB seats not present in template
+    if (seats && seats.length > 0) {
+      const templateNumbers = new Set(list.map((s) => s.number.trim().toUpperCase()));
+      seats.forEach((dbSeat) => {
+        const normNum = dbSeat.seat_number?.trim().toUpperCase();
+        if (normNum && !templateNumbers.has(normNum)) {
+          const isUpperFloor =
+            dbSeat.floor?.toLowerCase().includes('first') ||
+            dbSeat.floor?.toLowerCase().includes('2') ||
+            dbSeat.floor?.toLowerCase().includes('upper');
+          const activeAsgn = assignments?.find(
+            (a: any) => (a.seat_id === dbSeat.id || a.seat?.seat_number?.trim().toUpperCase() === normNum) && a.status === 'active'
+          );
+          let initials = undefined;
+          if (activeAsgn && (activeAsgn as any).student?.full_name) {
+            initials = (activeAsgn as any).student.full_name
+              .split(' ')
+              .map((n: string) => n[0])
+              .join('')
+              .substring(0, 2)
+              .toUpperCase();
+          }
+          list.push({
+            id: dbSeat.id,
+            number: dbSeat.seat_number,
+            floor: isUpperFloor ? 2 : 1,
+            section: dbSeat.section || 'A',
+            sectionName: dbSeat.section ? `Section ${dbSeat.section}` : 'Open Reading Hall',
+            zoneType: dbSeat.section === 'D' ? 'discussion' : dbSeat.section === 'A' ? 'cabin' : 'open',
+            status: activeAsgn || dbSeat.status === 'occupied' ? 'occupied' : dbSeat.status === 'maintenance' ? 'reserved' : 'available',
+            userInitials: activeAsgn || dbSeat.status === 'occupied' ? (initials || 'ST') : undefined,
+            amenities: { hasPower: true, hasWindowView: false, hasLamp: true, noiseLevel: 'silent', deskSize: '130cm Focus Desk' },
+          });
+        }
+      });
+    }
+
+    return list;
+  }, [seats, assignments]);
+
+  const floorSeats = liveFloorSeats.filter((s) => s.floor === activeFloor);
 
   const filteredSeats = floorSeats.filter((seat) => {
     if (filterType === 'available') return seat.status === 'available';
@@ -390,7 +489,7 @@ export function SeatMapPreview() {
   const totalSeats = floorSeats.length;
   const availableCount = floorSeats.filter((s) => s.status === 'available').length;
   const occupiedCount = floorSeats.filter((s) => s.status === 'occupied').length;
-  const occupancyPercentage = Math.round((occupiedCount / totalSeats) * 100);
+  const occupancyPercentage = totalSeats > 0 ? Math.round((occupiedCount / totalSeats) * 100) : 0;
 
   return (
     <div className="w-full bg-white rounded-3xl p-6 sm:p-8 lg:p-10 text-slate-900 border border-slate-200 shadow-xl shadow-slate-200/50 relative">
@@ -874,8 +973,9 @@ export function SeatMapPreview() {
                     <ArrowRight className="w-4 h-4" />
                   </Link>
                 ) : (
-                  <div className="text-xs text-slate-500 italic bg-slate-100 px-3.5 py-2 rounded-xl border border-slate-200">
-                    Currently assigned to student {selectedSeat.userInitials}
+                  <div className="text-xs text-slate-600 font-medium bg-slate-100 px-3.5 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                    <span>Currently allocated to student {selectedSeat.userInitials || 'Member'}</span>
                   </div>
                 )}
               </div>
